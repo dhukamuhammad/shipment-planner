@@ -219,144 +219,141 @@ const Calculation = () => {
     );
 
     return (
-        <div className="space-y-6 relative">
+        <div className="space-y-3 relative pb-2">
+            {/* Custom CSS (Wahi purana wala yahan rahega) */}
             <style>{`
-                .custom-scrollbar::-webkit-scrollbar { height: 6px; }
+                .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
                 .custom-scrollbar::-webkit-scrollbar-track { background: #F4F5F7; border-radius: 10px; }
                 .custom-scrollbar::-webkit-scrollbar-thumb { background: #D9DDE5; border-radius: 10px; }
                 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #5A5DF6; }
+                table { border-collapse: separate !important; border-spacing: 0; }
+                thead th { background-clip: padding-box; border-bottom: 1px solid #D9DDE5; }
+                thead tr:last-child th { border-bottom: 2px solid #D9DDE5; }
+                tbody td { border-bottom: 1px solid #D9DDE5; }
+                input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+                input[type=number] { -moz-appearance: textfield; }
             `}</style>
 
-            {/* Header Section */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* COMPACT HEADER SECTION */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
                 <div>
-                    <h1 className="text-2xl font-bold text-[#1C2340]">Shipment Calculation</h1>
-                    <p className="text-sm text-[#1C2340]/50 mt-0.5">Master sheet for inventory and restock planning</p>
+                    <h1 className="text-lg font-bold text-[#1C2340] leading-tight">Shipment Calculation</h1>
                 </div>
 
-                <div className="flex items-center gap-3 flex-wrap">
-                    {/* UPDATED: Upload Button with Disabled Logic */}
-                    <button
-                        onClick={() => setIsUploadModalOpen(true)}
-                        disabled={calculationData.length > 0}
-                        title={calculationData.length > 0 ? "A calculation plan already exists. Delete the old one from Uploads to add a new file." : "Upload Calculation File"}
-                        className={`flex items-center gap-2 px-4 py-2 bg-white border border-[#D9DDE5] rounded-[5px] text-xs font-semibold shadow-sm transition-all
-                            ${calculationData.length > 0
-                                ? 'opacity-50 cursor-not-allowed text-gray-400'
-                                : 'text-[#1C2340] hover:bg-[#F4F5F7]'}`}
-                    >
-                        <Upload size={14} className={calculationData.length > 0 ? "text-gray-400" : "text-[#5A5DF6]"} />
-                        Upload CSV/XLSX
-                    </button>
-                    <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-[#5A5DF6] hover:bg-[#494ce0] text-white rounded-[5px] text-xs font-semibold shadow-sm">
-                        <Plus size={14} /> Add New SKU
-                    </button>
-                    <div className="hidden md:block w-px h-6 bg-[#D9DDE5] mx-1"></div>
-
-                    <button
-                        onClick={handleResetCalculations}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <button onClick={handleResetCalculations}
                         title="Manually edited Final-WH values ko formula se reset karega"
                         className="flex items-center gap-2 px-4 py-2 bg-white border border-[#D9DDE5] rounded-[5px] text-xs font-semibold text-[#E74C3C] hover:bg-red-50 shadow-sm"
                     >
-                        <RefreshCcw size={14} /> Reset Formulas
+                        <RefreshCcw size={12} /> Reset Formulas
                     </button>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-white border border-[#D9DDE5] rounded-[5px] text-xs font-semibold text-[#1C2340] hover:bg-[#F4F5F7] shadow-sm">
-                        <Download size={14} /> Export
+                    <button onClick={() => setIsUploadModalOpen(true)} disabled={calculationData.length > 0} title={calculationData.length > 0 ? "Delete old plan to upload new" : "Upload File"} className={`flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#D9DDE5] rounded-[4px] text-[11px] font-semibold shadow-sm transition-all ${calculationData.length > 0 ? 'opacity-50 cursor-not-allowed text-gray-400' : 'text-[#1C2340] hover:bg-[#F4F5F7]'}`}>
+                        <Upload size={12} className={calculationData.length > 0 ? "text-gray-400" : "text-[#5A5DF6]"} /> Upload
+                    </button>
+                    <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#5A5DF6] hover:bg-[#494ce0] text-white rounded-[4px] text-[11px] font-semibold shadow-sm">
+                        <Plus size={12} /> Add SKU
+                    </button>
+                    <div className="hidden md:block w-px h-4 bg-[#D9DDE5] mx-0.5"></div>
+                    <button className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#D9DDE5] rounded-[4px] text-[11px] font-semibold text-[#1C2340] hover:bg-[#F4F5F7] shadow-sm">
+                        <Download size={12} /> Export
                     </button>
                 </div>
             </div>
 
-            {/* Top Cards (EXCEL-LIKE INLINE EDITING) */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+            {/* COMPACT TOP CARDS (EXCEL-LIKE INLINE EDITING) */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {/* Card 1: AFS Days */}
-                <div className="bg-white border border-[#D9DDE5] rounded-[5px] p-5 flex items-center gap-4 shadow-sm group">
-                    <div className="w-11 h-11 rounded-[5px] bg-[#F4F5F7] flex items-center justify-center shrink-0">
-                        <CalendarDays size={20} className="text-[#5A5DF6]" />
+                <div className="bg-white border border-[#D9DDE5] rounded-[4px] p-2.5 flex items-center gap-3 shadow-sm group">
+                    <div className="w-8 h-8 rounded-[4px] bg-[#F4F5F7] flex items-center justify-center shrink-0">
+                        <CalendarDays size={16} className="text-[#5A5DF6]" />
                     </div>
                     <div>
-                        <p className="text-xs text-[#1C2340]/50 font-medium uppercase tracking-wide">AFS Days</p>
+                        <p className="text-[10px] text-[#1C2340]/60 font-bold uppercase tracking-wider mb-0.5">AFS Days</p>
                         <input
                             type="number"
                             value={masterData.afs_days || ''}
                             onChange={(e) => {
                                 setMasterData({ ...masterData, afs_days: e.target.value });
-                                handleMasterAutoSave('afs_days', e.target.value); // 🔥 Real-time save on typing
+                                handleMasterAutoSave('afs_days', e.target.value);
                             }}
-                            className="text-2xl font-bold text-[#1C2340] mt-0.5 bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-24 px-1 py-0 transition-colors -ml-1"
+                            className="text-lg font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-16 px-0.5 py-0 transition-colors"
                         />
                     </div>
                 </div>
 
                 {/* Card 2: Shipment Plan Days */}
-                <div className="bg-white border border-[#D9DDE5] rounded-[5px] p-5 flex items-center gap-4 shadow-sm group">
-                    <div className="w-11 h-11 rounded-[5px] bg-[#F4F5F7] flex items-center justify-center shrink-0">
-                        <Truck size={20} className="text-[#5A5DF6]" />
+                <div className="bg-white border border-[#D9DDE5] rounded-[4px] p-2.5 flex items-center gap-3 shadow-sm group">
+                    <div className="w-8 h-8 rounded-[4px] bg-[#F4F5F7] flex items-center justify-center shrink-0">
+                        <Truck size={16} className="text-[#5A5DF6]" />
                     </div>
                     <div className="flex flex-col">
-                        <p className="text-xs text-[#1C2340]/50 font-medium uppercase tracking-wide">Shipment Plan</p>
-                        <div className="flex items-end mt-0.5">
+                        <p className="text-[10px] text-[#1C2340]/60 font-bold uppercase tracking-wider mb-0.5">Shipment Plan</p>
+                        <div className="flex items-baseline">
                             <input
                                 type="number"
                                 value={masterData.shipment_plan_days || ''}
                                 onChange={(e) => {
                                     setMasterData({ ...masterData, shipment_plan_days: e.target.value });
-                                    handleMasterAutoSave('shipment_plan_days', e.target.value); // 🔥 Real-time save on typing
+                                    handleMasterAutoSave('shipment_plan_days', e.target.value);
                                 }}
-                                className="text-2xl font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-20 px-1 py-0 transition-colors -ml-1"
+                                className="text-lg font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-14 px-0.5 py-0 transition-colors"
                             />
-                            <span className="text-sm font-normal text-[#1C2340]/40 mb-1 ml-1">Days</span>
+                            <span className="text-[10px] font-semibold text-[#1C2340]/40 ml-1">Days</span>
                         </div>
                     </div>
                 </div>
 
                 {/* Card 3: Bunch Qty */}
-                <div className="bg-white border border-[#D9DDE5] rounded-[5px] p-5 flex items-center gap-4 shadow-sm group">
-                    <div className="w-11 h-11 rounded-[5px] bg-[#F4F5F7] flex items-center justify-center shrink-0">
-                        <Layers size={20} className="text-[#5A5DF6]" />
+                <div className="bg-white border border-[#D9DDE5] rounded-[4px] p-2.5 flex items-center gap-3 shadow-sm group">
+                    <div className="w-8 h-8 rounded-[4px] bg-[#F4F5F7] flex items-center justify-center shrink-0">
+                        <Layers size={16} className="text-[#5A5DF6]" />
                     </div>
                     <div>
-                        <p className="text-xs text-[#1C2340]/50 font-medium uppercase tracking-wide">Bunch Qty</p>
+                        <p className="text-[10px] text-[#1C2340]/60 font-bold uppercase tracking-wider mb-0.5">Bunch Qty</p>
                         <input
                             type="number"
                             value={masterData.bunch_qty || ''}
                             onChange={(e) => {
                                 setMasterData({ ...masterData, bunch_qty: e.target.value });
-                                handleMasterAutoSave('bunch_qty', e.target.value); // 🔥 Real-time save on typing
+                                handleMasterAutoSave('bunch_qty', e.target.value);
                             }}
-                            className="text-2xl font-bold text-[#1C2340] mt-0.5 bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-24 px-1 py-0 transition-colors -ml-1"
+                            className="text-lg font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-16 px-0.5 py-0 transition-colors"
                         />
                     </div>
                 </div>
 
-                {/* Card 4: To Ship (Non-editable, calculated later) */}
-                <div className="bg-white border border-[#D9DDE5] rounded-[5px] p-5 flex items-center gap-4 shadow-sm relative overflow-hidden">
-                    <div className="w-11 h-11 rounded-[5px] bg-[#5A5DF6]/10 flex items-center justify-center shrink-0 relative z-10">
-                        <Package size={20} className="text-[#5A5DF6]" />
+                {/* Card 4: To Ship (Non-editable) */}
+                <div className="bg-white border border-[#D9DDE5] rounded-[4px] p-2.5 flex items-center gap-3 shadow-sm relative overflow-hidden">
+                    <div className="w-8 h-8 rounded-[4px] bg-[#5A5DF6]/10 flex items-center justify-center shrink-0 relative z-10">
+                        <Package size={16} className="text-[#5A5DF6]" />
                     </div>
                     <div className="relative z-10">
-                        <p className="text-xs text-[#1C2340]/50 font-medium uppercase tracking-wide">To Ship</p>
-                        <h2 className="text-2xl font-bold text-[#1C2340] mt-0.5 px-1 -ml-1">{(masterData.to_ship_qty || 0).toLocaleString()}</h2>
+                        <p className="text-[10px] text-[#1C2340]/60 font-bold uppercase tracking-wider mb-0.5">To Ship</p>
+                        <h2 className="text-lg font-bold text-[#1C2340] px-0.5">{(masterData.to_ship_qty || 0).toLocaleString()}</h2>
                     </div>
                 </div>
             </div>
 
             {/* Main Table Card */}
             <div className="bg-white border border-[#D9DDE5] rounded-[5px] shadow-sm flex flex-col min-w-0 overflow-hidden">
-                <div className="p-4 border-b border-[#D9DDE5] flex items-center justify-between bg-white rounded-t-[5px]">
-                    <div className="relative w-full max-w-sm">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#1C2340]/40" size={16} />
-                        <input type="text" placeholder="Search by SKU or Title..." className="w-full pl-9 pr-4 py-2 text-xs border border-[#D9DDE5] rounded-[4px] focus:outline-none focus:border-[#5A5DF6]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+
+                {/* COMPACT TABLE TOOLBAR */}
+                <div className="px-3 py-2 border-b border-[#D9DDE5] flex items-center justify-between bg-[#F9FAFB] rounded-t-[5px]">
+                    <div className="relative w-full max-w-xs">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#1C2340]/40" size={14} />
+                        <input type="text" placeholder="Search by SKU or Title..." className="w-full pl-8 pr-3 py-1.5 text-[11px] border border-[#D9DDE5] rounded-[4px] focus:outline-none focus:border-[#5A5DF6]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                     </div>
                     <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2 text-xs font-semibold text-[#1C2340]/60 pr-3 border-r border-[#D9DDE5]">
-                            <Layers size={14} /> <span>Showing {filteredData.length} SKUs</span>
+                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#1C2340]/60 pr-3 border-r border-[#D9DDE5]">
+                            <Layers size={12} /> <span>{filteredData.length} SKUs</span>
                         </div>
-                        <button className="p-1.5 text-[#1C2340]/60 hover:text-[#5A5DF6] hover:bg-[#5A5DF6]/10 rounded-[4px]"><SlidersHorizontal size={16} /></button>
+                        <button className="p-1 text-[#1C2340]/60 hover:text-[#5A5DF6] hover:bg-[#5A5DF6]/10 rounded-[3px]"><SlidersHorizontal size={14} /></button>
                     </div>
                 </div>
 
-                {/* NAYA UPDATE: overflow-y-auto aur max-h-[60vh] add kiya hai taaki horizontal scrollbar hamesha screen par rahe */}
-                <div className="w-full overflow-x-auto overflow-y-auto custom-scrollbar pb-1 min-h-[300px] max-h-[54vh] bg-white">
+                {/* 🔥 TABLE CONTAINER (HEIGHT INCREASED: max-h-[72vh]) 🔥 */}
+                <div className="w-full overflow-x-auto overflow-y-auto custom-scrollbar min-h-[300px] max-h-[69vh] bg-white">
+                    {/* ... (Yahan se aapka aage ka table ka code shuru hoga: {filteredData.length === 0 ? ...) */}
                     {filteredData.length === 0 ? (
                         <div className="flex justify-center items-center h-full min-h-[300px]">
                             <p className="text-sm text-[#1C2340]/50 font-medium py-10">No data found in database. Please upload a report.</p>
