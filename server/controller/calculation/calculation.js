@@ -251,9 +251,10 @@ const uploadCalculationReport = async (req, res) => {
 };
 
 // =======================================================
-// 2. MANUAL ADD SINGLE SKU ROW
+// 2. MANUAL ADD SINGLE SKU ROW (Smart Insert)
 // =======================================================
 const addManualCalculationRow = async (req, res) => {
+    let connection;
     try {
         const data = req.body;
 
@@ -261,34 +262,92 @@ const addManualCalculationRow = async (req, res) => {
             return errorResponse(res, "Plan ID, Group Name and SKU are required!", 400);
         }
 
-        const connection = await db.getConnection();
+        connection = await db.getConnection();
+
+        // Ensure hum report_id pass karein taaki cascade delete smoothly kaam kare
+        const [masterRes] = await connection.query(`SELECT report_id FROM shipment_calculations_master WHERE id = ?`, [data.planId]);
+        const reportId = masterRes.length > 0 ? masterRes[0].report_id : null;
+
+        // 🔥 SMART QUERY: Hum sirf wahi columns insert karenge jo manual hain. 
+        // Baki sab (Variants, Sum, etc.) automatically '0' ho jayengi (MySQL Default).
+        // Aur Formula columns jab API fetch hogi tab automatically calculate ho jayengi.
         const insertQuery = `
             INSERT INTO shipment_calculation_items (
-                plan_id, group_name, sku, title, category, 
-                int_wh, dec_wh, non_apron_qty, 
-                apr_sky_blue, apr_dark_blue, apr_brown, apr_green, apr_tan, apr_black, apr_red, apr_grey, 
-                weight, total_weight, hsn, gst, cost, 
-                ref_sku, ref_title, tra_qty, quantity, available_qty, fulfilment_id, 
-                sale_total, sale_wh, ship_wh, sum_val, final_wh
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                plan_id, report_id, group_name, sku, title, category, 
+                hsn, gst, cost, 
+                ref_sku, ref_title, fulfilment_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
+        // Backend automatically forces FC ID to BLR4
+        const fcId = 'BLR4';
+
         await connection.query(insertQuery, [
-            data.planId, data.groupName, data.sku, data.title || null, data.category || null,
-            data.intWh || 0, data.decWh || 0, data.nonApronQty || 0,
-            data.aprSkyBlue || 0, data.aprDarkBlue || 0, data.aprBrown || 0, data.aprGreen || 0, data.aprTan || 0, data.aprBlack || 0, data.aprRed || 0, data.aprGrey || 0,
-            data.weight || 0, data.totalWeight || 0, data.hsn || null, data.gst || null, data.cost || 0,
-            data.sku2 || null, data.title2 || null, data.traQty || 0, data.quantity || 0, data.availableQty || 0, data.fulfilmentId || null,
-            data.saleTotal || 0, data.saleWh || 0, data.shipWh || 0, data.sum || 0, data.finalWh || 0
+            data.planId,
+            reportId,
+            data.groupName,
+            data.sku,
+            data.title || null,
+            data.category || null,
+            data.hsn || null,
+            data.gst || null,
+            data.cost || 0,
+
+            // 🔥 Reference SKU aur Title me aage wali value automatically add ho jayegi
+            data.sku,
+            data.title || null,
+            fcId
         ]);
 
         connection.release();
         return successResponse(res, "SKU row added successfully!", null, 201);
     } catch (error) {
         console.error("Add Manual Row Error:", error);
+        if (connection) connection.release();
         return errorResponse(res, "Failed to add manual row", 500);
     }
 };
+
+// =======================================================
+// 7. EDIT CALCULATION ROW
+// =======================================================
+const editCalculationRow = async (req, res) => {
+    try {
+        const { itemId, groupName, sku, title, category, hsn, gst, cost } = req.body;
+        const connection = await db.getConnection();
+
+        await connection.query(
+            `UPDATE shipment_calculation_items 
+             SET group_name=?, sku=?, title=?, category=?, hsn=?, gst=?, cost=?, ref_sku=?, ref_title=?
+             WHERE id=?`,
+            [groupName, sku, title, category, hsn, gst, cost, sku, title, itemId]
+        );
+        connection.release();
+        return successResponse(res, "Row updated successfully!", null, 200);
+    } catch (error) {
+        console.error("Edit Row Error:", error);
+        return errorResponse(res, "Failed to edit row", 500);
+    }
+};
+
+// =======================================================
+// 8. DELETE CALCULATION ROW
+// =======================================================
+const deleteCalculationRow = async (req, res) => {
+    try {
+        const { itemId } = req.params; // ID URL param se aayegi
+        const connection = await db.getConnection();
+
+        await connection.query(`DELETE FROM shipment_calculation_items WHERE id=?`, [itemId]);
+        connection.release();
+        return successResponse(res, "Row deleted successfully!", null, 200);
+    } catch (error) {
+        console.error("Delete Row Error:", error);
+        return errorResponse(res, "Failed to delete row", 500);
+    }
+};
+
+// module.exports me editCalculationRow, deleteCalculationRow zaroor add karein.
 
 // =======================================================
 // 3. GET CALCULATION DATA (Master & Items)
@@ -471,11 +530,12 @@ const resetFinalWh = async (req, res) => {
     }
 };
 
-
 // Module exports mein naya function add karna mat bhoolna:
 module.exports = {
     uploadCalculationReport,
     addManualCalculationRow,
+    editCalculationRow,
+    deleteCalculationRow,
     getCalculationData,
     updateMasterData,
     updateItemFinalWh,

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
     Search, Download, CalendarDays, Truck, Layers, Package,
-    Plus, Upload, SlidersHorizontal, X, Loader2, UploadCloud, TrendingDown, TrendingUp, RefreshCcw
+    Plus, Upload, SlidersHorizontal, X, Loader2, UploadCloud,
+    TrendingDown, TrendingUp, RefreshCcw, ChevronLeft, ChevronRight,
+    Pencil, Trash2, Check, X as CloseIcon
 } from 'lucide-react';
 import api from '../../services/api';
 
@@ -21,6 +23,26 @@ const Calculation = () => {
 
     // Form State
     const [formData, setFormData] = useState({});
+
+    const [collapsedGroups, setCollapsedGroups] = useState(() => {
+        try {
+            const saved = localStorage.getItem('calc_collapsedGroups');
+            return saved ? JSON.parse(saved) : {
+                product: false, initialWH: false, variants: false, specs: false, logistics: false
+            };
+        } catch {
+            return { product: false, initialWH: false, variants: false, specs: false, logistics: false };
+        }
+    });
+
+    // collapsedGroups change hote hi localStorage me save karo
+    useEffect(() => {
+        localStorage.setItem('calc_collapsedGroups', JSON.stringify(collapsedGroups));
+    }, [collapsedGroups]);
+
+    const toggleGroup = (group) => {
+        setCollapsedGroups(prev => ({ ...prev, [group]: !prev[group] }));
+    };
 
     // Double click cell expand karne ke liye
     const [expandedCell, setExpandedCell] = useState({ rowId: null, colName: null });
@@ -94,6 +116,53 @@ const Calculation = () => {
         }
     };
 
+    // 🔥 NAYE STATES: Modal Edit & Delete ke liye
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editFormData, setEditFormData] = useState({});
+
+    // --- ROW DELETE HANDLER ---
+    const handleDeleteRow = async (itemId) => {
+        if (!window.confirm("Are you sure you want to delete this SKU?")) return;
+        try {
+            await api.delete(`/delete-row/${itemId}`);
+            setCalculationData(prev => prev.filter(row => row.id !== itemId));
+        } catch (error) {
+            alert("Failed to delete row.");
+        }
+    };
+
+    // --- MODAL EDIT HANDLERS ---
+    const startEditing = (row) => {
+        setEditFormData({
+            id: row.id,
+            groupName: row.group_name, sku: row.sku, title: row.title,
+            category: row.category, hsn: row.hsn, gst: row.gst, cost: row.cost
+        });
+        setIsEditModalOpen(true);
+    };
+
+    const handleEditInputChange = (e) => {
+        setEditFormData({ ...editFormData, [e.target.name]: e.target.value });
+    };
+
+    const handleEditSubmit = async (e) => {
+        e.preventDefault();
+        try {
+            await api.put("/edit-row", { itemId: editFormData.id, ...editFormData });
+            // UI instantly update karo
+            setCalculationData(prev => prev.map(row => row.id === editFormData.id ? {
+                ...row,
+                group_name: editFormData.groupName, sku: editFormData.sku,
+                title: editFormData.title, category: editFormData.category,
+                hsn: editFormData.hsn, gst: editFormData.gst, cost: editFormData.cost,
+                ref_sku: editFormData.sku, ref_title: editFormData.title
+            } : row));
+            setIsEditModalOpen(false);
+        } catch (error) {
+            alert("Failed to save edits.");
+        }
+    };
+
     useEffect(() => {
         fetchCalculationData();
     }, []);
@@ -143,6 +212,13 @@ const Calculation = () => {
     const handleInputChange = (e) => {
         setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
     };
+
+    // Number input par mouse scroll se value change hone se rokne ke liye
+    const handleWheelBlur = (e) => {
+        e.target.blur();
+    };
+
+
 
     // Ship-WH aur Int-WH ko real-time recalculate karne ke liye
     // (AFS Days / Shipment Plan Days / Bunch Qty change hote hi turant reflect hoga)
@@ -211,6 +287,13 @@ const Calculation = () => {
         });
     }, [calculationData, masterData.afs_days, masterData.shipment_plan_days, masterData.bunch_qty]);
 
+    const totalToShip = React.useMemo(() => {
+        return displayData.reduce((total, item) => {
+            const val = Number(item.final_wh);
+            return total + (isNaN(val) ? 0 : val); // Agar blank ("") ya text hai, toh 0 count karega
+        }, 0);
+    }, [displayData]);
+
 
     // Filter Logic for Search Bar
     const filteredData = displayData.filter(item =>
@@ -218,22 +301,117 @@ const Calculation = () => {
         (item.title && item.title.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
+    const closedCount = Object.values(collapsedGroups).filter(Boolean).length;
+    // Agar 2 ya usse zyada group close hain, to font bada karo
+    const isSpacious = closedCount >= 2;
+    const activeText = isSpacious ? "text-sm" : "text-xs";
+    const activeHead = isSpacious ? "text-xs" : "text-[10px]";
+    const activeSubHead = isSpacious ? "text-xs" : "text-[11px]";
+
+    const defaultColWidths = {
+        group_name: 120, sku: 120, title: 250, category: 100,
+        int_wh: 90, dec_wh: 90, non_apron_qty: 110,
+        sky_blue: 85, dark_blue: 85, brown: 85, green: 85, tan: 85, black: 85, red: 85, grey: 85,
+        weight: 80, total_weight: 110, hsn: 80, gst: 70, cost: 80,
+        ref_sku: 130, ref_title: 200, tra_qty: 85, quantity: 85, available_qty: 110,
+        fc_id: 75, sale_total: 95, sale_wh: 95, ship_wh: 95, sum_val: 75, final_wh: 95
+    };
+
+    const colWidthsRef = useRef((() => {
+        try {
+            const saved = localStorage.getItem('calc_colWidths');
+            return saved ? { ...defaultColWidths, ...JSON.parse(saved) } : { ...defaultColWidths };
+        } catch {
+            return { ...defaultColWidths };
+        }
+    })());
+
+    const colRefs = useRef({});
+
+    const tableRef = useRef(null);
+
+    // Sabhi visible columns ki widths ka total sum nikalne ke liye (table ki asli width set karne ke liye)
+    const calculateTotalTableWidth = () => {
+        const w = colWidthsRef.current;
+        let total = 0;
+        total += collapsedGroups.product ? 40 : (w.group_name + w.sku + w.title + w.category);
+        total += collapsedGroups.initialWH ? 40 : (w.int_wh + w.dec_wh + w.non_apron_qty);
+        total += collapsedGroups.variants ? 40 : (w.sky_blue + w.dark_blue + w.brown + w.green + w.tan + w.black + w.red + w.grey);
+        total += collapsedGroups.specs ? 40 : (w.weight + w.total_weight + w.hsn + w.gst + w.cost);
+        total += collapsedGroups.logistics ? 40 : (w.ref_sku + w.ref_title + w.tra_qty + w.quantity + w.available_qty + w.fc_id + w.sale_total + w.sale_wh + w.ship_wh + w.sum_val + w.final_wh);
+        return total;
+    };
+
+    // 🔥 EXCEL-LIKE COLUMN RESIZE ENGINE — <col> aur table dono ki width update karega (real shrink, no redistribution)
+    const handleResizeMouseDown = (colName) => (e) => {
+        e.preventDefault();
+        const startX = e.pageX;
+        const startWidth = colWidthsRef.current[colName];
+        const colEl = colRefs.current[colName];
+
+        const handleMouseMove = (moveEvent) => {
+            const newWidth = Math.max(20, startWidth + (moveEvent.pageX - startX)); // 20px minimum, Excel jaisa
+            if (colEl) {
+                colEl.style.width = `${newWidth}px`;
+            }
+            colWidthsRef.current[colName] = newWidth;
+
+            // Table ki total width ko bhi sync karo, taaki freed space doosre columns me na phaile
+            if (tableRef.current) {
+                tableRef.current.style.width = `${calculateTotalTableWidth()}px`;
+            }
+        };
+
+        const handleMouseUp = () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            // Resize khatam hote hi naya width localStorage me save karo
+            localStorage.setItem('calc_colWidths', JSON.stringify(colWidthsRef.current));
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    };
+
+
+    // 🔥 NAYE STATES: Column Visibility Modal ke liye
+    const [isColumnFilterOpen, setIsColumnFilterOpen] = useState(false);
+    const defaultVisibleColumns = {
+        group_name: true, sku: true, title: true, category: true,
+        int_wh: true, dec_wh: true, non_apron_qty: true,
+        sky_blue: true, dark_blue: true, brown: true, green: true, tan: true, black: true, red: true, grey: true,
+        weight: true, total_weight: true, hsn: true, gst: true, cost: true,
+        ref_sku: true, ref_title: true, tra_qty: true, quantity: true, available_qty: true, fc_id: true, sale_total: true, sale_wh: true, ship_wh: true, sum_val: true, final_wh: true
+    };
+
+    const [visibleColumns, setVisibleColumns] = useState(() => {
+        try {
+            const saved = localStorage.getItem('calc_visibleColumns');
+            return saved ? { ...defaultVisibleColumns, ...JSON.parse(saved) } : { ...defaultVisibleColumns };
+        } catch {
+            return { ...defaultVisibleColumns };
+        }
+    });
+
+    // visibleColumns change hote hi localStorage me save karo
+    useEffect(() => {
+        localStorage.setItem('calc_visibleColumns', JSON.stringify(visibleColumns));
+    }, [visibleColumns]);
+
+    const handleColumnToggle = (colKey) => {
+        setVisibleColumns(prev => ({ ...prev, [colKey]: !prev[colKey] }));
+    };
+
+    // Helper: Dynamic ColSpan count karne ke liye (Agar columns hide ki gayi hain)
+    const getColSpan = (cols) => cols.filter(c => visibleColumns[c]).length;
+    const productSpan = getColSpan(['group_name', 'sku', 'title', 'category']);
+    const initWHSpan = getColSpan(['int_wh', 'dec_wh', 'non_apron_qty']);
+    const variantsSpan = getColSpan(['sky_blue', 'dark_blue', 'brown', 'green', 'tan', 'black', 'red', 'grey']);
+    const specsSpan = getColSpan(['weight', 'total_weight', 'hsn', 'gst', 'cost']);
+    const logisticsSpan = getColSpan(['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', 'fc_id', 'sale_total', 'sale_wh', 'ship_wh', 'sum_val', 'final_wh']);
+
     return (
         <div className="space-y-3 relative pb-2">
-            {/* Custom CSS (Wahi purana wala yahan rahega) */}
-            <style>{`
-                .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
-                .custom-scrollbar::-webkit-scrollbar-track { background: #F4F5F7; border-radius: 10px; }
-                .custom-scrollbar::-webkit-scrollbar-thumb { background: #D9DDE5; border-radius: 10px; }
-                .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #5A5DF6; }
-                table { border-collapse: separate !important; border-spacing: 0; }
-                thead th { background-clip: padding-box; border-bottom: 1px solid #D9DDE5; }
-                thead tr:last-child th { border-bottom: 2px solid #D9DDE5; }
-                tbody td { border-bottom: 1px solid #D9DDE5; }
-                input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-                input[type=number] { -moz-appearance: textfield; }
-            `}</style>
-
             {/* COMPACT HEADER SECTION */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
                 <div>
@@ -260,84 +438,71 @@ const Calculation = () => {
                 </div>
             </div>
 
-            {/* COMPACT TOP CARDS (EXCEL-LIKE INLINE EDITING) */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {/* Card 1: AFS Days */}
-                <div className="bg-white border border-[#D9DDE5] rounded-[4px] p-2.5 flex items-center gap-3 shadow-sm group">
-                    <div className="w-8 h-8 rounded-[4px] bg-[#F4F5F7] flex items-center justify-center shrink-0">
-                        <CalendarDays size={16} className="text-[#5A5DF6]" />
-                    </div>
-                    <div>
-                        <p className="text-[10px] text-[#1C2340]/60 font-bold uppercase tracking-wider mb-0.5">AFS Days</p>
-                        <input
-                            type="number"
-                            value={masterData.afs_days || ''}
-                            onChange={(e) => {
-                                setMasterData({ ...masterData, afs_days: e.target.value });
-                                handleMasterAutoSave('afs_days', e.target.value);
-                            }}
-                            className="text-lg font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-16 px-0.5 py-0 transition-colors"
-                        />
-                    </div>
+            {/* SLIM SINGLE-ROW SETTINGS STRIP (Table ke liye zyada space free karne ke liye) */}
+            <div className="bg-white border border-[#D9DDE5] rounded-[5px] px-4 py-2 flex items-center gap-6 shadow-sm flex-wrap">
+                <div className="flex items-center gap-2">
+                    <CalendarDays size={14} className="text-[#5A5DF6]" />
+                    <span className="text-[11px] font-bold text-[#1C2340]/60 uppercase tracking-wider">AFS Days</span>
+                    <input
+                        type="number"
+                        value={masterData.afs_days || ''}
+                        onChange={(e) => {
+                            setMasterData({ ...masterData, afs_days: e.target.value });
+                            handleMasterAutoSave('afs_days', e.target.value);
+                        }}
+                        onWheel={handleWheelBlur}
+                        className="text-sm font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-12 px-0.5 py-0 transition-colors"
+                    />
                 </div>
 
-                {/* Card 2: Shipment Plan Days */}
-                <div className="bg-white border border-[#D9DDE5] rounded-[4px] p-2.5 flex items-center gap-3 shadow-sm group">
-                    <div className="w-8 h-8 rounded-[4px] bg-[#F4F5F7] flex items-center justify-center shrink-0">
-                        <Truck size={16} className="text-[#5A5DF6]" />
-                    </div>
-                    <div className="flex flex-col">
-                        <p className="text-[10px] text-[#1C2340]/60 font-bold uppercase tracking-wider mb-0.5">Shipment Plan</p>
-                        <div className="flex items-baseline">
-                            <input
-                                type="number"
-                                value={masterData.shipment_plan_days || ''}
-                                onChange={(e) => {
-                                    setMasterData({ ...masterData, shipment_plan_days: e.target.value });
-                                    handleMasterAutoSave('shipment_plan_days', e.target.value);
-                                }}
-                                className="text-lg font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-14 px-0.5 py-0 transition-colors"
-                            />
-                            <span className="text-[10px] font-semibold text-[#1C2340]/40 ml-1">Days</span>
-                        </div>
-                    </div>
+                <div className="w-px h-5 bg-[#D9DDE5]"></div>
+
+                <div className="flex items-center gap-2">
+                    <Truck size={14} className="text-[#5A5DF6]" />
+                    <span className="text-[11px] font-bold text-[#1C2340]/60 uppercase tracking-wider">Shipment Plan</span>
+                    <input
+                        type="number"
+                        value={masterData.shipment_plan_days || ''}
+                        onChange={(e) => {
+                            setMasterData({ ...masterData, shipment_plan_days: e.target.value });
+                            handleMasterAutoSave('shipment_plan_days', e.target.value);
+                        }}
+                        onWheel={handleWheelBlur}
+                        className="text-sm font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-12 px-0.5 py-0 transition-colors"
+                    />
+                    <span className="text-[10px] font-semibold text-[#1C2340]/40">Days</span>
                 </div>
 
-                {/* Card 3: Bunch Qty */}
-                <div className="bg-white border border-[#D9DDE5] rounded-[4px] p-2.5 flex items-center gap-3 shadow-sm group">
-                    <div className="w-8 h-8 rounded-[4px] bg-[#F4F5F7] flex items-center justify-center shrink-0">
-                        <Layers size={16} className="text-[#5A5DF6]" />
-                    </div>
-                    <div>
-                        <p className="text-[10px] text-[#1C2340]/60 font-bold uppercase tracking-wider mb-0.5">Bunch Qty</p>
-                        <input
-                            type="number"
-                            value={masterData.bunch_qty || ''}
-                            onChange={(e) => {
-                                setMasterData({ ...masterData, bunch_qty: e.target.value });
-                                handleMasterAutoSave('bunch_qty', e.target.value);
-                            }}
-                            className="text-lg font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-16 px-0.5 py-0 transition-colors"
-                        />
-                    </div>
+                <div className="w-px h-5 bg-[#D9DDE5]"></div>
+
+                <div className="flex items-center gap-2">
+                    <Layers size={14} className="text-[#5A5DF6]" />
+                    <span className="text-[11px] font-bold text-[#1C2340]/60 uppercase tracking-wider">Bunch Qty</span>
+                    <input
+                        type="number"
+                        value={masterData.bunch_qty || ''}
+                        onChange={(e) => {
+                            setMasterData({ ...masterData, bunch_qty: e.target.value });
+                            handleMasterAutoSave('bunch_qty', e.target.value);
+                        }}
+                        onWheel={handleWheelBlur}
+                        className="text-sm font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-12 px-0.5 py-0 transition-colors"
+                    />
                 </div>
 
-                {/* Card 4: To Ship (Non-editable) */}
-                <div className="bg-white border border-[#D9DDE5] rounded-[4px] p-2.5 flex items-center gap-3 shadow-sm relative overflow-hidden">
-                    <div className="w-8 h-8 rounded-[4px] bg-[#5A5DF6]/10 flex items-center justify-center shrink-0 relative z-10">
-                        <Package size={16} className="text-[#5A5DF6]" />
-                    </div>
-                    <div className="relative z-10">
-                        <p className="text-[10px] text-[#1C2340]/60 font-bold uppercase tracking-wider mb-0.5">To Ship</p>
-                        <h2 className="text-lg font-bold text-[#1C2340] px-0.5">{(masterData.to_ship_qty || 0).toLocaleString()}</h2>
-                    </div>
+                <div className="w-px h-5 bg-[#D9DDE5]"></div>
+
+                <div className="flex items-center gap-2 ml-auto bg-[#5A5DF6]/10 px-3 py-1 rounded-[4px]">
+                    <Package size={14} className="text-[#5A5DF6]" />
+                    <span className="text-[11px] font-bold text-[#5A5DF6] uppercase tracking-wider">To Ship</span>
+                    <span className="text-sm font-bold text-[#1C2340]">{totalToShip.toLocaleString()}</span>
                 </div>
             </div>
 
             {/* Main Table Card */}
             <div className="bg-white border border-[#D9DDE5] rounded-[5px] shadow-sm flex flex-col min-w-0 overflow-hidden">
 
-                {/* COMPACT TABLE TOOLBAR */}
+                {/* COMPACT TABLE TOOLBAR (Updated with Filter Click Handler) */}
                 <div className="px-3 py-2 border-b border-[#D9DDE5] flex items-center justify-between bg-[#F9FAFB] rounded-t-[5px]">
                     <div className="relative w-full max-w-xs">
                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#1C2340]/40" size={14} />
@@ -347,161 +512,381 @@ const Calculation = () => {
                         <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#1C2340]/60 pr-3 border-r border-[#D9DDE5]">
                             <Layers size={12} /> <span>{filteredData.length} SKUs</span>
                         </div>
-                        <button className="p-1 text-[#1C2340]/60 hover:text-[#5A5DF6] hover:bg-[#5A5DF6]/10 rounded-[3px]"><SlidersHorizontal size={14} /></button>
+                        {/* 🔥 Filter Modal Trigger Button */}
+                        <button onClick={() => setIsColumnFilterOpen(true)} className="p-1 text-[#1C2340]/60 hover:text-[#5A5DF6] hover:bg-[#5A5DF6]/10 rounded-[3px] transition-colors"><SlidersHorizontal size={14} /></button>
                     </div>
                 </div>
 
-                {/* 🔥 TABLE CONTAINER (HEIGHT INCREASED: max-h-[72vh]) 🔥 */}
-                <div className="w-full overflow-x-auto overflow-y-auto custom-scrollbar min-h-[300px] max-h-[69vh] bg-white">
-                    {/* ... (Yahan se aapka aage ka table ka code shuru hoga: {filteredData.length === 0 ? ...) */}
+                {/* 🔥 COMPLETE EXCEL-STYLE TABLE WITH FILTER & ACTIONS 🔥 */}
+                <div className="w-full overflow-x-auto overflow-y-auto custom-scrollbar min-h-[300px] max-h-[79vh] bg-white">
                     {filteredData.length === 0 ? (
                         <div className="flex justify-center items-center h-full min-h-[300px]">
                             <p className="text-sm text-[#1C2340]/50 font-medium py-10">No data found in database. Please upload a report.</p>
                         </div>
                     ) : (
-                        <table className="w-full text-left border-collapse whitespace-nowrap min-w-[2500px]">
-                            {/* UPDATED: Added bg-white on thead to completely block text leaking through the gap */}
+                        <table ref={typeof tableRef !== 'undefined' ? tableRef : null} className="text-left whitespace-nowrap" style={typeof calculateTotalTableWidth === 'function' ? { width: calculateTotalTableWidth() } : { minWidth: "2500px" }}>
+
+                            {/* 🔥 COLGROUP: Core column widths control */}
+                            <colgroup>
+                                {/* Action Column ColGroup — Sabse pehle */}
+                                <col style={{ width: 64 }} />
+
+                                {collapsedGroups.product ? (
+                                    <col style={{ width: 40 }} />
+                                ) : (
+                                    <>
+                                        {visibleColumns.group_name && <col ref={el => colRefs.current.group_name = el} style={{ width: colWidthsRef.current.group_name }} />}
+                                        {visibleColumns.sku && <col ref={el => colRefs.current.sku = el} style={{ width: colWidthsRef.current.sku }} />}
+                                        {visibleColumns.title && <col ref={el => colRefs.current.title = el} style={{ width: colWidthsRef.current.title }} />}
+                                        {visibleColumns.category && <col ref={el => colRefs.current.category = el} style={{ width: colWidthsRef.current.category }} />}
+                                    </>
+                                )}
+                                {collapsedGroups.initialWH ? (
+                                    <col style={{ width: 40 }} />
+                                ) : (
+                                    <>
+                                        {visibleColumns.int_wh && <col ref={el => colRefs.current.int_wh = el} style={{ width: colWidthsRef.current.int_wh }} />}
+                                        {visibleColumns.dec_wh && <col ref={el => colRefs.current.dec_wh = el} style={{ width: colWidthsRef.current.dec_wh }} />}
+                                        {visibleColumns.non_apron_qty && <col ref={el => colRefs.current.non_apron_qty = el} style={{ width: colWidthsRef.current.non_apron_qty }} />}
+                                    </>
+                                )}
+                                {collapsedGroups.variants ? (
+                                    <col style={{ width: 40 }} />
+                                ) : (
+                                    <>
+                                        {visibleColumns.sky_blue && <col ref={el => colRefs.current.sky_blue = el} style={{ width: colWidthsRef.current.sky_blue }} />}
+                                        {visibleColumns.dark_blue && <col ref={el => colRefs.current.dark_blue = el} style={{ width: colWidthsRef.current.dark_blue }} />}
+                                        {visibleColumns.brown && <col ref={el => colRefs.current.brown = el} style={{ width: colWidthsRef.current.brown }} />}
+                                        {visibleColumns.green && <col ref={el => colRefs.current.green = el} style={{ width: colWidthsRef.current.green }} />}
+                                        {visibleColumns.tan && <col ref={el => colRefs.current.tan = el} style={{ width: colWidthsRef.current.tan }} />}
+                                        {visibleColumns.black && <col ref={el => colRefs.current.black = el} style={{ width: colWidthsRef.current.black }} />}
+                                        {visibleColumns.red && <col ref={el => colRefs.current.red = el} style={{ width: colWidthsRef.current.red }} />}
+                                        {visibleColumns.grey && <col ref={el => colRefs.current.grey = el} style={{ width: colWidthsRef.current.grey }} />}
+                                    </>
+                                )}
+                                {collapsedGroups.specs ? (
+                                    <col style={{ width: 40 }} />
+                                ) : (
+                                    <>
+                                        {visibleColumns.weight && <col ref={el => colRefs.current.weight = el} style={{ width: colWidthsRef.current.weight }} />}
+                                        {visibleColumns.total_weight && <col ref={el => colRefs.current.total_weight = el} style={{ width: colWidthsRef.current.total_weight }} />}
+                                        {visibleColumns.hsn && <col ref={el => colRefs.current.hsn = el} style={{ width: colWidthsRef.current.hsn }} />}
+                                        {visibleColumns.gst && <col ref={el => colRefs.current.gst = el} style={{ width: colWidthsRef.current.gst }} />}
+                                        {visibleColumns.cost && <col ref={el => colRefs.current.cost = el} style={{ width: colWidthsRef.current.cost }} />}
+                                    </>
+                                )}
+                                {collapsedGroups.logistics ? (
+                                    <col style={{ width: 40 }} />
+                                ) : (
+                                    <>
+                                        {visibleColumns.ref_sku && <col ref={el => colRefs.current.ref_sku = el} style={{ width: colWidthsRef.current.ref_sku }} />}
+                                        {visibleColumns.ref_title && <col ref={el => colRefs.current.ref_title = el} style={{ width: colWidthsRef.current.ref_title }} />}
+                                        {visibleColumns.tra_qty && <col ref={el => colRefs.current.tra_qty = el} style={{ width: colWidthsRef.current.tra_qty }} />}
+                                        {visibleColumns.quantity && <col ref={el => colRefs.current.quantity = el} style={{ width: colWidthsRef.current.quantity }} />}
+                                        {visibleColumns.available_qty && <col ref={el => colRefs.current.available_qty = el} style={{ width: colWidthsRef.current.available_qty }} />}
+                                        {visibleColumns.fc_id && <col ref={el => colRefs.current.fc_id = el} style={{ width: colWidthsRef.current.fc_id }} />}
+                                        {visibleColumns.sale_total && <col ref={el => colRefs.current.sale_total = el} style={{ width: colWidthsRef.current.sale_total }} />}
+                                        {visibleColumns.sale_wh && <col ref={el => colRefs.current.sale_wh = el} style={{ width: colWidthsRef.current.sale_wh }} />}
+                                        {visibleColumns.ship_wh && <col ref={el => colRefs.current.ship_wh = el} style={{ width: colWidthsRef.current.ship_wh }} />}
+                                        {visibleColumns.sum_val && <col ref={el => colRefs.current.sum_val = el} style={{ width: colWidthsRef.current.sum_val }} />}
+                                        {visibleColumns.final_wh && <col ref={el => colRefs.current.final_wh = el} style={{ width: colWidthsRef.current.final_wh }} />}
+                                    </>
+                                )}
+                            </colgroup>
+
+                            {/* SMART COLLAPSIBLE & RESIZABLE THEAD */}
                             <thead className="sticky top-0 z-20 shadow-sm bg-white">
                                 {/* Top Row - Grouped Headers */}
-                                <tr className="text-[10px] font-bold text-[#1C2340]/60 uppercase tracking-wider border-b border-[#D9DDE5]">
-                                    <th className="px-4 py-3 bg-[#F4F5F7]" colSpan="4">Product Identification</th>
-                                    <th className="px-4 py-3 bg-blue-50 text-center border-l border-[#D9DDE5]/50" colSpan="3">Initial WH Quantities</th>
-                                    <th className="px-4 py-3 bg-purple-50 text-center border-l border-[#D9DDE5]/50" colSpan="8">Variant Breakdown</th>
-                                    <th className="px-4 py-3 bg-green-50 text-center border-l border-[#D9DDE5]/50" colSpan="5">Specs & Financials</th>
-                                    <th className="px-4 py-3 bg-orange-50 text-center border-l border-[#D9DDE5]/50" colSpan="11">Logistics & Calculation</th>
+                                <tr className={`${typeof activeHead !== 'undefined' ? activeHead : 'text-[10px]'} font-bold text-[#1C2340]/60 uppercase tracking-wider border-b border-[#D9DDE5]`}>
+
+                                    {/* Action Column Header — Sabse pehle */}
+                                    <th rowSpan={2} className="w-16 px-2 py-3 bg-[#1C2340]/5 border-r-2 border-[#D9DDE5] align-bottom text-center text-[#1C2340]/50">
+                                        •••
+                                    </th>
+
+                                    {/* 1. Product Identification */}
+                                    {collapsedGroups.product ? (
+                                        <th rowSpan={2} className="w-6 py-2 bg-[#F4F5F7] border-r border-b-2 border-[#D9DDE5] align-top">
+                                            <div className="flex flex-col items-center gap-1.5">
+                                                <button onClick={() => toggleGroup('product')} className="p-0.5 hover:bg-black/10 rounded transition-colors"><ChevronRight size={12} title="Expand" /></button>
+                                                <span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>PRODUCT</span>
+                                            </div>
+                                        </th>
+                                    ) : productSpan > 0 && (
+                                        <th className="px-4 py-3 bg-[#F4F5F7]" colSpan={typeof productSpan !== 'undefined' ? productSpan : 4}>
+                                            <div className="flex items-center justify-between">
+                                                <span>Product Identification</span>
+                                                <button onClick={() => toggleGroup('product')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button>
+                                            </div>
+                                        </th>
+                                    )}
+
+                                    {/* 2. Initial WH Quantities */}
+                                    {collapsedGroups.initialWH ? (
+                                        <th rowSpan={2} className="w-6 py-2 bg-blue-50 border-l border-r border-b-2 border-[#D9DDE5]/50 align-top">
+                                            <div className="flex flex-col items-center gap-1.5">
+                                                <button onClick={() => toggleGroup('initialWH')} className="p-0.5 hover:bg-black/10 rounded transition-colors"><ChevronRight size={12} /></button>
+                                                <span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>INITIAL WH</span>
+                                            </div>
+                                        </th>
+                                    ) : initWHSpan > 0 && (
+                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-blue-50" colSpan={typeof initWHSpan !== 'undefined' ? initWHSpan : 3}>
+                                            <div className="flex items-center justify-between">
+                                                <span>Initial WH Quantities</span>
+                                                <button onClick={() => toggleGroup('initialWH')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button>
+                                            </div>
+                                        </th>
+                                    )}
+
+                                    {/* 3. Variant Breakdown */}
+                                    {collapsedGroups.variants ? (
+                                        <th rowSpan={2} className="w-6 py-2 bg-purple-50 border-l border-r border-b-2 border-[#D9DDE5]/50 align-top">
+                                            <div className="flex flex-col items-center gap-1.5">
+                                                <button onClick={() => toggleGroup('variants')} className="p-0.5 hover:bg-black/10 rounded transition-colors"><ChevronRight size={12} /></button>
+                                                <span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>VARIANTS</span>
+                                            </div>
+                                        </th>
+                                    ) : variantsSpan > 0 && (
+                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-purple-50" colSpan={typeof variantsSpan !== 'undefined' ? variantsSpan : 8}>
+                                            <div className="flex items-center justify-between">
+                                                <span>Variant Breakdown</span>
+                                                <button onClick={() => toggleGroup('variants')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button>
+                                            </div>
+                                        </th>
+                                    )}
+
+                                    {/* 4. Specs & Financials */}
+                                    {collapsedGroups.specs ? (
+                                        <th rowSpan={2} className="w-6 py-2 bg-green-50 border-l border-r border-b-2 border-[#D9DDE5]/50 align-top">
+                                            <div className="flex flex-col items-center gap-1.5">
+                                                <button onClick={() => toggleGroup('specs')} className="p-0.5 hover:bg-black/10 rounded transition-colors"><ChevronRight size={12} /></button>
+                                                <span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>SPECS</span>
+                                            </div>
+                                        </th>
+                                    ) : specsSpan > 0 && (
+                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-green-50" colSpan={typeof specsSpan !== 'undefined' ? specsSpan : 5}>
+                                            <div className="flex items-center justify-between">
+                                                <span>Specs & Financials</span>
+                                                <button onClick={() => toggleGroup('specs')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button>
+                                            </div>
+                                        </th>
+                                    )}
+
+                                    {/* 5. Logistics & Calculation */}
+                                    {collapsedGroups.logistics ? (
+                                        <th rowSpan={2} className="w-6 py-2 bg-orange-50 border-l border-r border-b-2 border-[#D9DDE5]/50 align-top">
+                                            <div className="flex flex-col items-center gap-1.5">
+                                                <button onClick={() => toggleGroup('logistics')} className="p-0.5 hover:bg-black/10 rounded transition-colors"><ChevronRight size={12} /></button>
+                                                <span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>LOGISTICS</span>
+                                            </div>
+                                        </th>
+                                    ) : logisticsSpan > 0 && (
+                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-orange-50" colSpan={typeof logisticsSpan !== 'undefined' ? logisticsSpan : 11}>
+                                            <div className="flex items-center justify-between">
+                                                <span>Logistics & Calculation</span>
+                                                <button onClick={() => toggleGroup('logistics')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button>
+                                            </div>
+                                        </th>
+                                    )}
                                 </tr>
 
-                                {/* Bottom Row - Specific Headers */}
-                                <tr className="text-[11px] font-semibold text-[#1C2340] border-b-2 border-[#D9DDE5] bg-white relative z-10">
-                                    <th className="px-4 py-3 bg-white">Group Name</th>
-                                    <th className="px-4 py-3 bg-white">SKU</th>
-                                    <th className="px-4 py-3 max-w-[300px] bg-white">Title</th>
-                                    <th className="px-4 py-3 bg-white">Category</th>
+                                {/* Bottom Row - Specific Headers with Always-Visible Resizers */}
+                                <tr className={`${typeof activeSubHead !== 'undefined' ? activeSubHead : 'text-[11px]'} font-semibold text-[#1C2340] border-b-2 border-[#D9DDE5] bg-white relative z-10`}>
+                                    {!collapsedGroups.product && (
+                                        <>
+                                            {visibleColumns.group_name && <th style={{ width: colWidthsRef.current.group_name, minWidth: colWidthsRef.current.group_name }} className="px-4 py-3 bg-white relative group">Group Name<div onMouseDown={handleResizeMouseDown('group_name')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30 transition-colors" /></th>}
+                                            {visibleColumns.sku && <th style={{ width: colWidthsRef.current.sku, minWidth: colWidthsRef.current.sku }} className="px-4 py-3 bg-white relative group">SKU<div onMouseDown={handleResizeMouseDown('sku')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30 transition-colors" /></th>}
+                                            {visibleColumns.title && <th style={{ width: colWidthsRef.current.title, minWidth: colWidthsRef.current.title, maxWidth: colWidthsRef.current.title }} className="px-4 py-3 bg-white relative group">Title<div onMouseDown={handleResizeMouseDown('title')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30 transition-colors" /></th>}
+                                            {visibleColumns.category && <th style={{ width: colWidthsRef.current.category, minWidth: colWidthsRef.current.category }} className="px-4 py-3 bg-white relative group">Category<div onMouseDown={handleResizeMouseDown('category')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30 transition-colors" /></th>}
+                                        </>
+                                    )}
 
-                                    {/* Initial WH */}
-                                    <th className="px-4 py-3 text-center border-l border-[#D9DDE5]/50 bg-blue-50">Int - WH</th>
-                                    <th className="px-4 py-3 text-center bg-blue-50">Dec - WH</th>
-                                    <th className="px-4 py-3 text-center bg-blue-50">Non Apron Qty</th>
+                                    {!collapsedGroups.initialWH && (
+                                        <>
+                                            {visibleColumns.int_wh && <th style={{ width: colWidthsRef.current.int_wh, minWidth: colWidthsRef.current.int_wh }} className="px-4 py-3 text-center border-l border-[#D9DDE5]/50 bg-blue-50 relative group">Int - WH<div onMouseDown={handleResizeMouseDown('int_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.dec_wh && <th style={{ width: colWidthsRef.current.dec_wh, minWidth: colWidthsRef.current.dec_wh }} className="px-4 py-3 text-center bg-blue-50 relative group">Dec - WH<div onMouseDown={handleResizeMouseDown('dec_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.non_apron_qty && <th style={{ width: colWidthsRef.current.non_apron_qty, minWidth: colWidthsRef.current.non_apron_qty }} className="px-4 py-3 text-center bg-blue-50 relative group">Non Apron Qty<div onMouseDown={handleResizeMouseDown('non_apron_qty')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30" /></th>}
+                                        </>
+                                    )}
 
-                                    {/* Variant Headers */}
-                                    <th className="px-3 py-3 text-center border-l border-[#D9DDE5]/50 bg-purple-50"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#38BDF8]"></span>Sky Blue</div></th>
-                                    <th className="px-3 py-3 text-center bg-purple-50"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#1E40AF]"></span>Dark Blue</div></th>
-                                    <th className="px-3 py-3 text-center bg-purple-50"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#92400E]"></span>Brown</div></th>
-                                    <th className="px-3 py-3 text-center bg-purple-50"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#22B573]"></span>Green</div></th>
-                                    <th className="px-3 py-3 text-center bg-purple-50"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#D2B48C]"></span>Tan</div></th>
-                                    <th className="px-3 py-3 text-center bg-purple-50"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#1C2340]"></span>Black</div></th>
-                                    <th className="px-3 py-3 text-center bg-purple-50"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#E74C3C]"></span>Red</div></th>
-                                    <th className="px-3 py-3 text-center bg-purple-50"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#9CA3AF]"></span>Grey</div></th>
+                                    {!collapsedGroups.variants && (
+                                        <>
+                                            {visibleColumns.sky_blue && <th style={{ width: colWidthsRef.current.sky_blue, minWidth: colWidthsRef.current.sky_blue }} className="px-3 py-3 text-center border-l border-[#D9DDE5]/50 bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#38BDF8]"></span>Sky Blue</div><div onMouseDown={handleResizeMouseDown('sky_blue')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.dark_blue && <th style={{ width: colWidthsRef.current.dark_blue, minWidth: colWidthsRef.current.dark_blue }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#1E40AF]"></span>Dark Blue</div><div onMouseDown={handleResizeMouseDown('dark_blue')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.brown && <th style={{ width: colWidthsRef.current.brown, minWidth: colWidthsRef.current.brown }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#92400E]"></span>Brown</div><div onMouseDown={handleResizeMouseDown('brown')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.green && <th style={{ width: colWidthsRef.current.green, minWidth: colWidthsRef.current.green }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#22B573]"></span>Green</div><div onMouseDown={handleResizeMouseDown('green')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.tan && <th style={{ width: colWidthsRef.current.tan, minWidth: colWidthsRef.current.tan }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#D2B48C]"></span>Tan</div><div onMouseDown={handleResizeMouseDown('tan')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.black && <th style={{ width: colWidthsRef.current.black, minWidth: colWidthsRef.current.black }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#1C2340]"></span>Black</div><div onMouseDown={handleResizeMouseDown('black')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.red && <th style={{ width: colWidthsRef.current.red, minWidth: colWidthsRef.current.red }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#E74C3C]"></span>Red</div><div onMouseDown={handleResizeMouseDown('red')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.grey && <th style={{ width: colWidthsRef.current.grey, minWidth: colWidthsRef.current.grey }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#9CA3AF]"></span>Grey</div><div onMouseDown={handleResizeMouseDown('grey')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                        </>
+                                    )}
 
-                                    {/* Specs & Financials */}
-                                    <th className="px-4 py-3 text-center border-l border-[#D9DDE5]/50 bg-green-50">Weight</th>
-                                    <th className="px-4 py-3 text-center bg-green-50">Total Weight</th>
-                                    <th className="px-4 py-3 text-center bg-green-50">HSN</th>
-                                    <th className="px-4 py-3 text-center bg-green-50">GST</th>
-                                    <th className="px-4 py-3 text-center bg-green-50 text-[#22B573] font-bold">COST</th>
+                                    {!collapsedGroups.specs && (
+                                        <>
+                                            {visibleColumns.weight && <th style={{ width: colWidthsRef.current.weight, minWidth: colWidthsRef.current.weight }} className="px-4 py-3 text-center border-l border-[#D9DDE5]/50 bg-green-50 relative group">Weight<div onMouseDown={handleResizeMouseDown('weight')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.total_weight && <th style={{ width: colWidthsRef.current.total_weight, minWidth: colWidthsRef.current.total_weight }} className="px-4 py-3 text-center bg-green-50 relative group">Total Weight<div onMouseDown={handleResizeMouseDown('total_weight')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.hsn && <th style={{ width: colWidthsRef.current.hsn, minWidth: colWidthsRef.current.hsn }} className="px-4 py-3 text-center bg-green-50 relative group">HSN<div onMouseDown={handleResizeMouseDown('hsn')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.gst && <th style={{ width: colWidthsRef.current.gst, minWidth: colWidthsRef.current.gst }} className="px-4 py-3 text-center bg-green-50 relative group">GST<div onMouseDown={handleResizeMouseDown('gst')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.cost && <th style={{ width: colWidthsRef.current.cost, minWidth: colWidthsRef.current.cost }} className="px-4 py-3 text-center bg-green-50 text-[#22B573] font-bold relative group">COST<div onMouseDown={handleResizeMouseDown('cost')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                        </>
+                                    )}
 
-                                    {/* Logistics & Calculation */}
-                                    <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-orange-50 font-semibold text-[#1C2340]">SKU (Ref)</th>
-                                    <th className="px-4 py-3 bg-orange-50 font-semibold text-[#1C2340]">Title (Ref)</th>
-                                    <th className="px-4 py-3 text-center bg-orange-50">Tra. Qty</th>
-                                    <th className="px-4 py-3 text-center bg-orange-50">Quantity</th>
-                                    <th className="px-4 py-3 text-center bg-orange-50 text-[#5A5DF6] font-bold">Available Qty</th>
-                                    <th className="px-4 py-3 text-center bg-orange-50">FC ID</th>
-                                    <th className="px-4 py-3 text-center bg-orange-50">Sale-Total</th>
-                                    <th className="px-4 py-3 text-center bg-orange-50">Sale-WH</th>
-                                    <th className="px-4 py-3 text-center bg-orange-50">Ship - WH</th>
-                                    <th className="px-4 py-3 text-center bg-orange-50">Sum</th>
-                                    <th className="px-4 py-3 text-center bg-orange-50 font-bold text-[#E74C3C]">Final - WH</th>
+                                    {!collapsedGroups.logistics && (
+                                        <>
+                                            {visibleColumns.ref_sku && <th style={{ width: colWidthsRef.current.ref_sku, minWidth: colWidthsRef.current.ref_sku }} className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-orange-50 font-semibold text-[#1C2340] relative group">SKU (Ref)<div onMouseDown={handleResizeMouseDown('ref_sku')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.ref_title && <th style={{ width: colWidthsRef.current.ref_title, minWidth: colWidthsRef.current.ref_title, maxWidth: colWidthsRef.current.ref_title }} className="px-4 py-3 bg-orange-50 font-semibold text-[#1C2340] relative group">Title (Ref)<div onMouseDown={handleResizeMouseDown('ref_title')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.tra_qty && <th style={{ width: colWidthsRef.current.tra_qty, minWidth: colWidthsRef.current.tra_qty }} className="px-4 py-3 text-center bg-orange-50 relative group">Tra. Qty<div onMouseDown={handleResizeMouseDown('tra_qty')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.quantity && <th style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center bg-orange-50 relative group">Quantity<div onMouseDown={handleResizeMouseDown('quantity')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.available_qty && <th style={{ width: colWidthsRef.current.available_qty, minWidth: colWidthsRef.current.available_qty }} className="px-4 py-3 text-center bg-orange-50 text-[#5A5DF6] font-bold relative group">Available Qty<div onMouseDown={handleResizeMouseDown('available_qty')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.fc_id && <th style={{ width: colWidthsRef.current.fc_id, minWidth: colWidthsRef.current.fc_id }} className="px-4 py-3 text-center bg-orange-50 relative group">FC ID<div onMouseDown={handleResizeMouseDown('fc_id')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.sale_total && <th style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-Total<div onMouseDown={handleResizeMouseDown('sale_total')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.sale_wh && <th style={{ width: colWidthsRef.current.sale_wh, minWidth: colWidthsRef.current.sale_wh }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-WH<div onMouseDown={handleResizeMouseDown('sale_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.ship_wh && <th style={{ width: colWidthsRef.current.ship_wh, minWidth: colWidthsRef.current.ship_wh }} className="px-4 py-3 text-center bg-orange-50 relative group">Ship - WH<div onMouseDown={handleResizeMouseDown('ship_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.sum_val && <th style={{ width: colWidthsRef.current.sum_val, minWidth: colWidthsRef.current.sum_val }} className="px-4 py-3 text-center bg-orange-50 relative group">Sum<div onMouseDown={handleResizeMouseDown('sum_val')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.final_wh && <th style={{ width: colWidthsRef.current.final_wh, minWidth: colWidthsRef.current.final_wh }} className="px-4 py-3 text-center bg-orange-50 font-bold text-[#E74C3C] relative group">Final - WH<div onMouseDown={handleResizeMouseDown('final_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30" /></th>}
+                                        </>
+                                    )}
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-[#D9DDE5]">
-                                {filteredData.map((row) => (
-                                    <tr key={row.id} className="hover:bg-[#F4F5F7]/80 transition-colors text-xs text-[#1C2340]/80">
-                                        <td className="px-4 py-3 font-semibold text-[#1C2340]">{row.group_name}</td>
-                                        <td className="px-4 py-3"><span className="bg-[#F4F5F7] border border-[#D9DDE5] px-2 py-1 rounded-[3px] font-medium">{row.sku}</span></td>
-                                        {/* EXCEL LIKE DOUBLE-CLICK EXPAND FOR TITLE */}
-                                        <td
-                                            onDoubleClick={() => handleDoubleClick(row.id, 'title')}
-                                            className={`px-4 py-3 cursor-pointer transition-all duration-300 ${expandedCell.rowId === row.id && expandedCell.colName === 'title'
-                                                ? 'whitespace-normal min-w-[300px] break-words bg-white shadow-sm' // Expanded View
-                                                : 'max-w-[200px] truncate' // Truncated (Hidden) View
-                                                }`}
-                                            title="Double click to expand/collapse"
-                                        >
-                                            {row.title}
-                                        </td>
-                                        <td className="px-4 py-3">{row.category}</td>
+                            <tbody className="bg-white">
+                                {filteredData.map((row) => {
+                                    // REAL-TIME EXCEL MATH
+                                    const liveAfsDays = Number(masterData.afs_days) || 0;
+                                    const livePlanDays = Number(masterData.shipment_plan_days) || 0;
 
-                                        <td className="px-4 py-3 text-center border-l border-[#D9DDE5]/30 font-semibold">{row.int_wh}</td>
-                                        <td className="px-4 py-3 text-center">{row.dec_wh}</td>
-                                        <td className="px-4 py-3 text-center">{row.non_apron_qty}</td>
+                                    let liveShipWh = 0;
+                                    if (liveAfsDays > 0) {
+                                        liveShipWh = Math.ceil(((row.sale_wh / liveAfsDays) * livePlanDays) - row.available_qty);
+                                    }
 
-                                        {/* Variants Mapping */}
-                                        <td className="px-3 py-3 text-center border-l border-[#D9DDE5]/30">{row.apr_sky_blue ? <span className="font-bold text-[#38BDF8] bg-[#38BDF8]/10 px-2 py-0.5 rounded-[3px]">{row.apr_sky_blue}</span> : <span className="text-[#1C2340]/30">-</span>}</td>
-                                        <td className="px-3 py-3 text-center">{row.apr_dark_blue ? <span className="font-bold text-[#1E40AF] bg-[#1E40AF]/10 px-2 py-0.5 rounded-[3px]">{row.apr_dark_blue}</span> : <span className="text-[#1C2340]/30">-</span>}</td>
-                                        <td className="px-3 py-3 text-center">{row.apr_brown ? <span className="font-bold text-[#92400E] bg-[#92400E]/10 px-2 py-0.5 rounded-[3px]">{row.apr_brown}</span> : <span className="text-[#1C2340]/30">-</span>}</td>
-                                        <td className="px-3 py-3 text-center">{row.apr_green ? <span className="font-bold text-[#22B573] bg-[#22B573]/10 px-2 py-0.5 rounded-[3px]">{row.apr_green}</span> : <span className="text-[#1C2340]/30">-</span>}</td>
-                                        <td className="px-3 py-3 text-center">{row.apr_tan ? <span className="font-bold text-[#D2B48C] bg-[#D2B48C]/10 px-2 py-0.5 rounded-[3px]">{row.apr_tan}</span> : <span className="text-[#1C2340]/30">-</span>}</td>
-                                        <td className="px-3 py-3 text-center">{row.apr_black ? <span className="font-bold text-[#1C2340] bg-[#1C2340]/10 px-2 py-0.5 rounded-[3px]">{row.apr_black}</span> : <span className="text-[#1C2340]/30">-</span>}</td>
-                                        <td className="px-3 py-3 text-center">{row.apr_red ? <span className="font-bold text-[#E74C3C] bg-[#E74C3C]/10 px-2 py-0.5 rounded-[3px]">{row.apr_red}</span> : <span className="text-[#1C2340]/30">-</span>}</td>
-                                        <td className="px-3 py-3 text-center">{row.apr_grey ? <span className="font-bold text-[#9CA3AF] bg-[#9CA3AF]/10 px-2 py-0.5 rounded-[3px]">{row.apr_grey}</span> : <span className="text-[#1C2340]/30">-</span>}</td>
+                                    return (
+                                        <tr key={row.id} className={`group hover:bg-[#F4F5F7]/80 transition-colors text-[#1C2340]/80 ${typeof activeText !== 'undefined' ? activeText : 'text-xs'}`}>
 
-                                        <td className="px-4 py-3 text-center border-l border-[#D9DDE5]/30">{row.weight}</td>
-                                        <td className="px-4 py-3 text-center">{row.total_weight}</td>
-                                        <td className="px-4 py-3 text-center">{row.hsn || '-'}</td>
-                                        <td className="px-4 py-3 text-center">{row.gst || '-'}</td>
-                                        <td className="px-4 py-3 text-center font-bold text-[#22B573]">₹{row.cost}</td>
+                                            {/* Action Column Cell — Sabse pehle, icons sirf row hover pe dikhenge */}
+                                            <td className="w-16 px-2 py-3 text-center bg-white border-r-2 border-[#D9DDE5]">
+                                                <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button onClick={() => startEditing(row)} title="Edit SKU" className="p-1 text-[#5A5DF6] hover:bg-[#5A5DF6]/10 rounded transition-colors">
+                                                        <Pencil size={13} />
+                                                    </button>
+                                                    <button onClick={() => handleDeleteRow(row.id)} title="Delete Row" className="p-1 text-[#E74C3C] hover:bg-[#E74C3C]/10 rounded transition-colors">
+                                                        <Trash2 size={13} />
+                                                    </button>
+                                                </div>
+                                            </td>
 
-                                        {/* EXCEL LIKE DOUBLE-CLICK EXPAND FOR REF SKU & TITLE */}
-                                        <td className="px-4 py-3 border-l border-[#D9DDE5]/30 text-xs text-[#1C2340]/80 font-medium">
-                                            {row.ref_sku}
-                                        </td>
+                                            {/* 1. Product Identification Cells */}
+                                            {collapsedGroups.product ? (
+                                                <td className="bg-[#F4F5F7]/40 border-r border-[#D9DDE5]/40"></td>
+                                            ) : (
+                                                <>
+                                                    {visibleColumns.group_name && <td style={{ width: colWidthsRef.current.group_name, minWidth: colWidthsRef.current.group_name }} className="px-4 py-3 font-semibold text-[#1C2340]">{row.group_name}</td>}
+                                                    {visibleColumns.sku && <td style={{ width: colWidthsRef.current.sku, minWidth: colWidthsRef.current.sku }} className="px-4 py-3"><span className="bg-[#F4F5F7] border border-[#D9DDE5] px-2 py-1 rounded-[3px] font-medium">{row.sku}</span></td>}
+                                                    {visibleColumns.title && <td
+                                                        onDoubleClick={() => handleDoubleClick(row.id, 'title')}
+                                                        style={{ width: colWidthsRef.current.title, minWidth: colWidthsRef.current.title, maxWidth: colWidthsRef.current.title }}
+                                                        className={`px-4 py-3 cursor-pointer transition-all duration-300 ${expandedCell?.rowId === row.id && expandedCell?.colName === 'title' ? 'whitespace-normal break-words bg-white shadow-sm' : 'truncate'}`}
+                                                        title="Double click to expand"
+                                                    >
+                                                        {row.title}
+                                                    </td>}
+                                                    {visibleColumns.category && <td style={{ width: colWidthsRef.current.category, minWidth: colWidthsRef.current.category }} className="px-4 py-3">{row.category}</td>}
+                                                </>
+                                            )}
 
-                                        <td
-                                            onDoubleClick={() => handleDoubleClick(row.id, 'ref_title')}
-                                            className={`px-4 py-3 text-xs text-[#1C2340]/80 font-medium cursor-pointer transition-all duration-300 ${expandedCell.rowId === row.id && expandedCell.colName === 'ref_title'
-                                                ? 'whitespace-normal min-w-[300px] break-words bg-white shadow-sm'
-                                                : 'max-w-[200px] truncate'
-                                                }`}
-                                            title="Double click to expand"
-                                        >
-                                            {row.ref_title}
-                                        </td>
-                                        <td className="px-4 py-3 text-center font-semibold text-[#5A5DF6]">{row.tra_qty}</td>
-                                        <td className="px-4 py-3 text-center">{row.quantity}</td>
-                                        <td className="px-4 py-3 text-center font-bold text-[#1C2340] bg-[#F4F5F7]/50">{row.available_qty}</td>
-                                        <td className="px-4 py-3 text-center"><span className="bg-[#D9DDE5]/40 px-2 py-0.5 rounded-[3px] text-[10px]">{row.fulfilment_id}</span></td>
-                                        <td className="px-4 py-3 text-center">{row.sale_total}</td>
-                                        <td className="px-4 py-3 text-center">{row.sale_wh}</td>
-                                        <td className="px-4 py-3 text-center flex items-center justify-center gap-1">
-                                            {row.ship_wh < 0 ? <TrendingDown size={12} className="text-[#E74C3C]" /> : <TrendingUp size={12} className="text-[#22B573]" />}
-                                            <span className={row.ship_wh < 0 ? "text-[#E74C3C] font-semibold" : ""}>{row.ship_wh}</span>
-                                        </td>
-                                        <td className="px-4 py-3 text-center">{row.sum_val}</td>
-                                        {/* 🔥 INLINE EDIT FOR FINAL WH 🔥 */}
-                                        <td className="px-4 py-3 text-center bg-orange-50/30">
-                                            <input
-                                                type="number"
-                                                value={row.final_wh === "" ? "" : row.final_wh}
-                                                onChange={(e) => {
-                                                    const val = e.target.value;
-                                                    // UI ko turant update karne ke liye state set karein
-                                                    setCalculationData(prev => prev.map(p =>
-                                                        p.id === row.id ? { ...p, final_wh: val, is_manual_final_wh: 1 } : p
-                                                    ));
-                                                    // Background me DB update karein
-                                                    handleItemAutoSave(row.id, val);
-                                                }}
-                                                className={`w-16 text-center font-bold bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none transition-colors
-                                                        ${row.is_manual_final_wh ? 'text-[#5A5DF6]' : 'text-[#1C2340]'}`}
-                                            />
-                                        </td>
-                                    </tr>
-                                ))}
+                                            {/* 2. Initial WH Cells */}
+                                            {collapsedGroups.initialWH ? (
+                                                <td className="bg-blue-50/20 border-r border-[#D9DDE5]/40"></td>
+                                            ) : (
+                                                <>
+                                                    {visibleColumns.int_wh && <td style={{ width: colWidthsRef.current.int_wh, minWidth: colWidthsRef.current.int_wh }} className="px-4 py-3 text-center border-l border-[#D9DDE5]/30 font-semibold">{row.int_wh}</td>}
+                                                    {visibleColumns.dec_wh && <td style={{ width: colWidthsRef.current.dec_wh, minWidth: colWidthsRef.current.dec_wh }} className="px-4 py-3 text-center">{row.dec_wh}</td>}
+                                                    {visibleColumns.non_apron_qty && <td style={{ width: colWidthsRef.current.non_apron_qty, minWidth: colWidthsRef.current.non_apron_qty }} className="px-4 py-3 text-center">{row.non_apron_qty}</td>}
+                                                </>
+                                            )}
+
+                                            {/* 3. Variants Mapping Cells */}
+                                            {collapsedGroups.variants ? (
+                                                <td className="bg-purple-50/20 border-r border-[#D9DDE5]/40"></td>
+                                            ) : (
+                                                <>
+                                                    {visibleColumns.sky_blue && <td style={{ width: colWidthsRef.current.sky_blue, minWidth: colWidthsRef.current.sky_blue }} className="px-3 py-3 text-center border-l border-[#D9DDE5]/30">{row.apr_sky_blue ? <span className="font-bold text-[#38BDF8] bg-[#38BDF8]/10 px-2 py-0.5 rounded-[3px]">{row.apr_sky_blue}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.dark_blue && <td style={{ width: colWidthsRef.current.dark_blue, minWidth: colWidthsRef.current.dark_blue }} className="px-3 py-3 text-center">{row.apr_dark_blue ? <span className="font-bold text-[#1E40AF] bg-[#1E40AF]/10 px-2 py-0.5 rounded-[3px]">{row.apr_dark_blue}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.brown && <td style={{ width: colWidthsRef.current.brown, minWidth: colWidthsRef.current.brown }} className="px-3 py-3 text-center">{row.apr_brown ? <span className="font-bold text-[#92400E] bg-[#92400E]/10 px-2 py-0.5 rounded-[3px]">{row.apr_brown}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.green && <td style={{ width: colWidthsRef.current.green, minWidth: colWidthsRef.current.green }} className="px-3 py-3 text-center">{row.apr_green ? <span className="font-bold text-[#22B573] bg-[#22B573]/10 px-2 py-0.5 rounded-[3px]">{row.apr_green}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.tan && <td style={{ width: colWidthsRef.current.tan, minWidth: colWidthsRef.current.tan }} className="px-3 py-3 text-center">{row.apr_tan ? <span className="font-bold text-[#D2B48C] bg-[#D2B48C]/10 px-2 py-0.5 rounded-[3px]">{row.apr_tan}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.black && <td style={{ width: colWidthsRef.current.black, minWidth: colWidthsRef.current.black }} className="px-3 py-3 text-center">{row.apr_black ? <span className="font-bold text-[#1C2340] bg-[#1C2340]/10 px-2 py-0.5 rounded-[3px]">{row.apr_black}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.red && <td style={{ width: colWidthsRef.current.red, minWidth: colWidthsRef.current.red }} className="px-3 py-3 text-center">{row.apr_red ? <span className="font-bold text-[#E74C3C] bg-[#E74C3C]/10 px-2 py-0.5 rounded-[3px]">{row.apr_red}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.grey && <td style={{ width: colWidthsRef.current.grey, minWidth: colWidthsRef.current.grey }} className="px-3 py-3 text-center">{row.apr_grey ? <span className="font-bold text-[#9CA3AF] bg-[#9CA3AF]/10 px-2 py-0.5 rounded-[3px]">{row.apr_grey}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                </>
+                                            )}
+
+                                            {/* 4. Specs & Financials Cells */}
+                                            {collapsedGroups.specs ? (
+                                                <td className="bg-green-50/20 border-r border-[#D9DDE5]/40"></td>
+                                            ) : (
+                                                <>
+                                                    {visibleColumns.weight && <td style={{ width: colWidthsRef.current.weight, minWidth: colWidthsRef.current.weight }} className="px-4 py-3 text-center border-l border-[#D9DDE5]/30">{row.weight}</td>}
+                                                    {visibleColumns.total_weight && <td style={{ width: colWidthsRef.current.total_weight, minWidth: colWidthsRef.current.total_weight }} className="px-4 py-3 text-center">{row.total_weight}</td>}
+                                                    {visibleColumns.hsn && <td style={{ width: colWidthsRef.current.hsn, minWidth: colWidthsRef.current.hsn }} className="px-4 py-3 text-center">{row.hsn || '-'}</td>}
+                                                    {visibleColumns.gst && <td style={{ width: colWidthsRef.current.gst, minWidth: colWidthsRef.current.gst }} className="px-4 py-3 text-center">{row.gst || '-'}</td>}
+                                                    {visibleColumns.cost && <td style={{ width: colWidthsRef.current.cost, minWidth: colWidthsRef.current.cost }} className="px-4 py-3 text-center font-bold text-[#22B573]">₹{row.cost}</td>}
+                                                </>
+                                            )}
+
+                                            {/* 5. Logistics & Calculation Cells */}
+                                            {collapsedGroups.logistics ? (
+                                                <td className="bg-orange-50/20 border-r border-[#D9DDE5]/40"></td>
+                                            ) : (
+                                                <>
+                                                    {visibleColumns.ref_sku && <td style={{ width: colWidthsRef.current.ref_sku, minWidth: colWidthsRef.current.ref_sku }} className="px-4 py-3 border-l border-[#D9DDE5]/30 font-medium truncate">{row.ref_sku}</td>}
+                                                    {visibleColumns.ref_title && <td
+                                                        onDoubleClick={() => handleDoubleClick(row.id, 'ref_title')}
+                                                        style={{ width: colWidthsRef.current.ref_title, minWidth: colWidthsRef.current.ref_title, maxWidth: colWidthsRef.current.ref_title }}
+                                                        className={`px-4 py-3 font-medium cursor-pointer transition-all duration-300 ${expandedCell?.rowId === row.id && expandedCell?.colName === 'ref_title' ? 'whitespace-normal break-words bg-white shadow-sm' : 'truncate'}`}
+                                                        title="Double click to expand"
+                                                    >
+                                                        {row.ref_title}
+                                                    </td>}
+                                                    {visibleColumns.tra_qty && <td style={{ width: colWidthsRef.current.tra_qty, minWidth: colWidthsRef.current.tra_qty }} className="px-4 py-3 text-center font-semibold text-[#5A5DF6]">{row.tra_qty}</td>}
+                                                    {visibleColumns.quantity && <td style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center">{row.quantity}</td>}
+                                                    {visibleColumns.available_qty && <td style={{ width: colWidthsRef.current.available_qty, minWidth: colWidthsRef.current.available_qty }} className="px-4 py-3 text-center font-bold text-[#1C2340] bg-[#F4F5F7]/50">{row.available_qty}</td>}
+                                                    {visibleColumns.fc_id && <td style={{ width: colWidthsRef.current.fc_id, minWidth: colWidthsRef.current.fc_id }} className="px-4 py-3 text-center"><span className="bg-[#D9DDE5]/40 px-2 py-0.5 rounded-[3px] text-[10px]">{row.fulfilment_id}</span></td>}
+                                                    {visibleColumns.sale_total && <td style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center">{row.sale_total}</td>}
+                                                    {visibleColumns.sale_wh && <td style={{ width: colWidthsRef.current.sale_wh, minWidth: colWidthsRef.current.sale_wh }} className="px-4 py-3 text-center">{row.sale_wh}</td>}
+
+                                                    {visibleColumns.ship_wh && <td style={{ width: colWidthsRef.current.ship_wh, minWidth: colWidthsRef.current.ship_wh }} className="px-4 py-3 text-center flex items-center justify-center gap-1">
+                                                        {liveShipWh < 0 ? <TrendingDown size={12} className="text-[#E74C3C]" /> : <TrendingUp size={12} className="text-[#22B573]" />}
+                                                        <span className={liveShipWh < 0 ? "text-[#E74C3C] font-semibold" : ""}>{liveShipWh}</span>
+                                                    </td>}
+                                                    {visibleColumns.sum_val && <td style={{ width: colWidthsRef.current.sum_val, minWidth: colWidthsRef.current.sum_val }} className="px-4 py-3 text-center">{row.sum_val}</td>}
+
+                                                    {/* Inline Editable Final WH */}
+                                                    {visibleColumns.final_wh && <td style={{ width: colWidthsRef.current.final_wh, minWidth: colWidthsRef.current.final_wh }} className="px-4 py-3 text-center bg-orange-50/30">
+                                                        <input
+                                                            type="number"
+                                                            value={row.final_wh === "" ? "" : row.final_wh}
+                                                            onChange={(e) => {
+                                                                const val = e.target.value;
+                                                                setCalculationData(prev => prev.map(p => p.id === row.id ? { ...p, final_wh: val, is_manual_final_wh: 1 } : p));
+                                                                handleItemAutoSave(row.id, val);
+                                                            }}
+                                                            onWheel={handleWheelBlur}
+                                                            className="w-14 text-center font-bold bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none transition-colors"
+                                                            style={{ color: row.is_manual_final_wh ? '#5A5DF6' : '#1C2340' }}
+                                                        />
+                                                    </td>}
+                                                </>
+                                            )}
+
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     )}
                 </div>
+
             </div>
 
             {/* Modals Code from previous version remains exactly the same below... */}
@@ -546,27 +931,41 @@ const Calculation = () => {
                         </div>
 
                         <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+                            {/* 🔥 UPDATED ADD SKU FORM 🔥 */}
                             <form id="add-sku-form" onSubmit={handleManualSubmit} className="space-y-6">
-                                {/* Section 1: Basic Info */}
                                 <div>
-                                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Product Info</h4>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        <div><label className="text-xs text-gray-600">Group Name *</label><input type="text" name="groupName" required onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" placeholder="APR- Black" /></div>
-                                        <div><label className="text-xs text-gray-600">SKU *</label><input type="text" name="sku" required onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" placeholder="Apron_Black" /></div>
-                                        <div><label className="text-xs text-gray-600">Category</label><input type="text" name="category" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" /></div>
-                                        <div className="md:col-span-3"><label className="text-xs text-gray-600">Title</label><input type="text" name="title" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" /></div>
+                                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Product & Financial Info</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs text-gray-600">Group Name *</label>
+                                            <input type="text" name="groupName" required onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" placeholder="e.g. APR- Black" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-600">SKU *</label>
+                                            <input type="text" name="sku" required onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" placeholder="e.g. Apron_Black" />
+                                        </div>
+                                        <div className="md:col-span-2">
+                                            <label className="text-xs text-gray-600">Title</label>
+                                            <input type="text" name="title" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" placeholder="Full Product Title..." />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-600">Category</label>
+                                            <input type="text" name="category" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" placeholder="e.g. Apron" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-600">HSN</label>
+                                            <input type="text" name="hsn" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" placeholder="e.g. 6302" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-600">GST</label>
+                                            <input type="text" name="gst" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" placeholder="e.g. 5%" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-600">Cost (₹)</label>
+                                            <input type="number" step="0.01" name="cost" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" placeholder="0.00" />
+                                        </div>
                                     </div>
-                                </div>
-
-                                {/* Section 2: WH & Financials */}
-                                <div>
-                                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Warehouse & Financials</h4>
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                        <div><label className="text-xs text-gray-600">Int WH</label><input type="number" name="intWh" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" defaultValue="0" /></div>
-                                        <div><label className="text-xs text-gray-600">Cost (₹)</label><input type="number" name="cost" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" defaultValue="0" /></div>
-                                        <div><label className="text-xs text-gray-600">Quantity</label><input type="number" name="quantity" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" defaultValue="0" /></div>
-                                        <div><label className="text-xs text-gray-600">Weight (g)</label><input type="number" name="weight" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" defaultValue="0" /></div>
-                                    </div>
+                                    <p className="text-[10px] text-gray-400 mt-4 italic">* FC ID will automatically be set to 'BLR4'. Other quantities will be initialized to 0.</p>
                                 </div>
                             </form>
                         </div>
@@ -577,6 +976,142 @@ const Calculation = () => {
                             <button type="submit" form="add-sku-form" disabled={isLoading} className="px-5 py-2 bg-[#5A5DF6] text-white text-sm font-bold rounded-[5px] hover:bg-[#494ce0] flex items-center gap-2 transition-all disabled:opacity-70">
                                 {isLoading ? <><Loader2 size={16} className="animate-spin" /> Saving...</> : "Save SKU"}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 🔥 EDIT SKU MODAL 🔥 */}
+            {isEditModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="px-6 py-4 border-b flex justify-between items-center bg-[#F4F5F7]">
+                            <h3 className="font-bold text-[#1C2340] text-lg">Edit SKU Details</h3>
+                            <button onClick={() => setIsEditModalOpen(false)} className="text-gray-400 hover:text-gray-700 transition-colors">
+                                <CloseIcon size={20} />
+                            </button>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto">
+                            <form id="edit-sku-form" onSubmit={handleEditSubmit} className="space-y-6">
+                                <div>
+                                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Product & Financial Info</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs text-gray-600">Group Name *</label>
+                                            <input type="text" name="groupName" value={editFormData.groupName || ''} required onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-600">SKU *</label>
+                                            <input type="text" name="sku" value={editFormData.sku || ''} required onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                        </div>
+                                        <div className="md:col-span-2">
+                                            <label className="text-xs text-gray-600">Title</label>
+                                            <input type="text" name="title" value={editFormData.title || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-600">Category</label>
+                                            <input type="text" name="category" value={editFormData.category || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-600">HSN</label>
+                                            <input type="text" name="hsn" value={editFormData.hsn || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-600">GST</label>
+                                            <input type="text" name="gst" value={editFormData.gst || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-600">Cost (₹)</label>
+                                            <input type="number" step="0.01" name="cost" value={editFormData.cost || 0} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+
+                        <div className="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3">
+                            <button type="button" onClick={() => setIsEditModalOpen(false)} className="px-4 py-2 border rounded text-sm font-medium hover:bg-gray-100 transition-colors">Cancel</button>
+                            <button type="submit" form="edit-sku-form" className="px-4 py-2 bg-[#5A5DF6] hover:bg-[#494ce0] text-white rounded text-sm font-medium transition-colors">Save Changes</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 🔥 COLUMN VISIBILITY FILTER MODAL 🔥 */}
+            {isColumnFilterOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-[8px] shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in duration-200">
+                        <div className="px-5 py-4 border-b border-[#D9DDE5] flex justify-between items-center bg-[#F9FAFB]">
+                            <h3 className="font-bold text-[#1C2340] text-sm flex items-center gap-2">
+                                <SlidersHorizontal size={16} className="text-[#5A5DF6]" />
+                                Customize Columns
+                            </h3>
+                            <button onClick={() => setIsColumnFilterOpen(false)} className="text-[#1C2340]/40 hover:text-[#E74C3C] transition-colors">
+                                <CloseIcon size={18} />
+                            </button>
+                        </div>
+
+                        <div className="p-5 overflow-y-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 bg-white">
+                            <div>
+                                <h4 className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider mb-3 pb-1 border-b border-[#D9DDE5]/50">Product</h4>
+                                <div className="space-y-2.5">
+                                    {[['group_name', 'Group Name'], ['sku', 'SKU'], ['title', 'Title'], ['category', 'Category']].map(([k, l]) => (
+                                        <label key={k} className="flex items-center gap-2 cursor-pointer group">
+                                            <input type="checkbox" checked={visibleColumns[k]} onChange={() => handleColumnToggle(k)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                            <span className="text-[11px] font-medium text-[#1C2340]/80 group-hover:text-[#5A5DF6] transition-colors">{l}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <h4 className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider mb-3 pb-1 border-b border-[#D9DDE5]/50">Initial WH</h4>
+                                <div className="space-y-2.5">
+                                    {[['int_wh', 'Int - WH'], ['dec_wh', 'Dec - WH'], ['non_apron_qty', 'Non Apron Qty']].map(([k, l]) => (
+                                        <label key={k} className="flex items-center gap-2 cursor-pointer group">
+                                            <input type="checkbox" checked={visibleColumns[k]} onChange={() => handleColumnToggle(k)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                            <span className="text-[11px] font-medium text-[#1C2340]/80 group-hover:text-[#5A5DF6] transition-colors">{l}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <h4 className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider mb-3 pb-1 border-b border-[#D9DDE5]/50">Variants</h4>
+                                <div className="space-y-2.5">
+                                    {[['sky_blue', 'Sky Blue'], ['dark_blue', 'Dark Blue'], ['brown', 'Brown'], ['green', 'Green'], ['tan', 'Tan'], ['black', 'Black'], ['red', 'Red'], ['grey', 'Grey']].map(([k, l]) => (
+                                        <label key={k} className="flex items-center gap-2 cursor-pointer group">
+                                            <input type="checkbox" checked={visibleColumns[k]} onChange={() => handleColumnToggle(k)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                            <span className="text-[11px] font-medium text-[#1C2340]/80 group-hover:text-[#5A5DF6] transition-colors">{l}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <h4 className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider mb-3 pb-1 border-b border-[#D9DDE5]/50">Specs & Fin</h4>
+                                <div className="space-y-2.5">
+                                    {[['weight', 'Weight'], ['total_weight', 'Total Weight'], ['hsn', 'HSN'], ['gst', 'GST'], ['cost', 'Cost']].map(([k, l]) => (
+                                        <label key={k} className="flex items-center gap-2 cursor-pointer group">
+                                            <input type="checkbox" checked={visibleColumns[k]} onChange={() => handleColumnToggle(k)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                            <span className="text-[11px] font-medium text-[#1C2340]/80 group-hover:text-[#5A5DF6] transition-colors">{l}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <h4 className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider mb-3 pb-1 border-b border-[#D9DDE5]/50">Logistics</h4>
+                                <div className="space-y-2.5">
+                                    {[['ref_sku', 'SKU (Ref)'], ['ref_title', 'Title (Ref)'], ['tra_qty', 'Tra. Qty'], ['quantity', 'Quantity'], ['available_qty', 'Available Qty'], ['fc_id', 'FC ID'], ['sale_total', 'Sale-Total'], ['sale_wh', 'Sale-WH'], ['ship_wh', 'Ship-WH'], ['sum_val', 'Sum'], ['final_wh', 'Final-WH']].map(([k, l]) => (
+                                        <label key={k} className="flex items-center gap-2 cursor-pointer group">
+                                            <input type="checkbox" checked={visibleColumns[k]} onChange={() => handleColumnToggle(k)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                            <span className="text-[11px] font-medium text-[#1C2340]/80 group-hover:text-[#5A5DF6] transition-colors">{l}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="px-5 py-3 border-t border-[#D9DDE5] bg-[#F9FAFB] flex justify-end gap-3">
+                            <button onClick={() => setVisibleColumns(Object.keys(visibleColumns).reduce((acc, key) => ({ ...acc, [key]: true }), {}))} className="px-4 py-1.5 border border-[#D9DDE5] text-[#1C2340]/80 rounded-[4px] text-xs font-semibold hover:bg-white transition-colors">Select All</button>
+                            <button onClick={() => setIsColumnFilterOpen(false)} className="px-5 py-1.5 bg-[#5A5DF6] hover:bg-[#494ce0] text-white rounded-[4px] text-xs font-bold shadow-sm transition-colors">Apply Details</button>
                         </div>
                     </div>
                 </div>

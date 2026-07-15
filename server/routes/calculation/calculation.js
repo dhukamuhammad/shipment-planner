@@ -4,6 +4,8 @@ const upload = require("../../middleware/multer");
 const {
     uploadCalculationReport,
     addManualCalculationRow,
+    editCalculationRow,
+    deleteCalculationRow,
     getCalculationData,
     updateMasterData,
     updateItemFinalWh,
@@ -17,6 +19,9 @@ router.get("/getCalculationData", (req, res, next) => {
 router.post("/upload", upload.single("file"), uploadCalculationReport);
 router.post("/manual-add", addManualCalculationRow);
 
+router.delete("/delete-row/:id", deleteCalculationRow);
+
+router.put("/edit-row", editCalculationRow);
 router.put("/update-master", updateMasterData);
 router.put("/update-item-final-wh", updateItemFinalWh);
 router.put("/reset-final-wh", resetFinalWh);

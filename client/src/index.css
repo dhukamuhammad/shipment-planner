@@ -45,34 +45,38 @@ body {
   background: #5A5DF6;
 }
 
-/* 🔥 STICKY HEADER BUG FIX 🔥 */
 table {
   border-collapse: separate !important;
   border-spacing: 0;
+  table-layout: fixed;
 }
 
 thead th {
   background-clip: padding-box;
   border-bottom: 1px solid #D9DDE5;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 thead tr:last-child th {
   border-bottom: 2px solid #D9DDE5;
 }
 
-tbody td {
-  border-bottom: 1px solid #D9DDE5;
+tbody td span {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
-/* 🔥 HIDE NUMBER INPUT ARROWS (SPINNERS) 🔥 */
-/* Chrome, Safari, Edge, Opera */
 input::-webkit-outer-spin-button,
 input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
-/* Firefox */
 input[type=number] {
   -moz-appearance: textfield;
 }
