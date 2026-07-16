@@ -15,6 +15,7 @@ const navItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
     { name: 'Upload', icon: Upload, path: '/upload' },
     { name: 'Calculation', icon: CalculatorIcon, path: '/calculation' },
+    { name: 'Stock', icon: Hexagon, path: '/stock' },
     { name: 'Reports', icon: FileText, path: '/reports' },
 ];
 

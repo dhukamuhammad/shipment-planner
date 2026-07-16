@@ -9,13 +9,17 @@ const {
     getCalculationData,
     updateMasterData,
     updateItemFinalWh,
-    resetFinalWh
+    resetFinalWh,
+    getManifestDetails
 } = require("../../controller/calculation/calculation");
 
 router.get("/getCalculationData", (req, res, next) => {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     next();
-}, getCalculationData); // <--- GET Route (no-cache header add kiya)
+}, getCalculationData); 
+
+router.get("/getManifestDetails", getManifestDetails); // Add this line
+
 router.post("/upload", upload.single("file"), uploadCalculationReport);
 router.post("/manual-add", addManualCalculationRow);
 

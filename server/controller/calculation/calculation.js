@@ -251,7 +251,7 @@ const uploadCalculationReport = async (req, res) => {
 };
 
 // =======================================================
-// 2. MANUAL ADD SINGLE SKU ROW (Smart Insert)
+// 2. MANUAL ADD SINGLE SKU ROW (Smart Insert with Weight)
 // =======================================================
 const addManualCalculationRow = async (req, res) => {
     let connection;
@@ -264,39 +264,24 @@ const addManualCalculationRow = async (req, res) => {
 
         connection = await db.getConnection();
 
-        // Ensure hum report_id pass karein taaki cascade delete smoothly kaam kare
         const [masterRes] = await connection.query(`SELECT report_id FROM shipment_calculations_master WHERE id = ?`, [data.planId]);
         const reportId = masterRes.length > 0 ? masterRes[0].report_id : null;
 
-        // 🔥 SMART QUERY: Hum sirf wahi columns insert karenge jo manual hain. 
-        // Baki sab (Variants, Sum, etc.) automatically '0' ho jayengi (MySQL Default).
-        // Aur Formula columns jab API fetch hogi tab automatically calculate ho jayengi.
+        // 🔥 Weight column add kar di gayi hai
         const insertQuery = `
             INSERT INTO shipment_calculation_items (
                 plan_id, report_id, group_name, sku, title, category, 
-                hsn, gst, cost, 
+                hsn, gst, cost, weight,
                 ref_sku, ref_title, fulfilment_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
-        // Backend automatically forces FC ID to BLR4
         const fcId = 'BLR4';
 
         await connection.query(insertQuery, [
-            data.planId,
-            reportId,
-            data.groupName,
-            data.sku,
-            data.title || null,
-            data.category || null,
-            data.hsn || null,
-            data.gst || null,
-            data.cost || 0,
-
-            // 🔥 Reference SKU aur Title me aage wali value automatically add ho jayegi
-            data.sku,
-            data.title || null,
-            fcId
+            data.planId, reportId, data.groupName, data.sku, data.title || null, data.category || null,
+            data.hsn || null, data.gst || null, data.cost || 0, data.weight || 0, // 🔥 data.weight add kiya
+            data.sku, data.title || null, fcId
         ]);
 
         connection.release();
@@ -309,18 +294,19 @@ const addManualCalculationRow = async (req, res) => {
 };
 
 // =======================================================
-// 7. EDIT CALCULATION ROW
+// 7. EDIT CALCULATION ROW (With Weight)
 // =======================================================
 const editCalculationRow = async (req, res) => {
     try {
-        const { itemId, groupName, sku, title, category, hsn, gst, cost } = req.body;
+        // 🔥 weight destructure kiya
+        const { itemId, groupName, sku, title, category, hsn, gst, cost, weight } = req.body;
         const connection = await db.getConnection();
 
         await connection.query(
             `UPDATE shipment_calculation_items 
-             SET group_name=?, sku=?, title=?, category=?, hsn=?, gst=?, cost=?, ref_sku=?, ref_title=?
+             SET group_name=?, sku=?, title=?, category=?, hsn=?, gst=?, cost=?, weight=?, ref_sku=?, ref_title=?
              WHERE id=?`,
-            [groupName, sku, title, category, hsn, gst, cost, sku, title, itemId]
+            [groupName, sku, title, category, hsn, gst, cost, weight, sku, title, itemId] // 🔥 weight variable map kiya
         );
         connection.release();
         return successResponse(res, "Row updated successfully!", null, 200);
@@ -530,7 +516,40 @@ const resetFinalWh = async (req, res) => {
     }
 };
 
-// Module exports mein naya function add karna mat bhoolna:
+// =======================================================
+// 7. GET MANIFEST DETAILS (HSN/GST/Declared Value by SKU list)
+// =======================================================
+const getManifestDetails = async (req, res) => {
+    try {
+        const { skus } = req.query; // comma-separated SKU list
+        // if (!skus) return errorResponse(res, "SKUs are required", 400);
+
+        const skuList = skus.split(',').map(s => s.trim()).filter(Boolean);
+        if (skuList.length === 0) return successResponse(res, "No SKUs provided", [], 200);
+
+        const connection = await db.getConnection();
+        const placeholders = skuList.map(() => '?').join(',');
+
+        const [rows] = await connection.query(
+            `SELECT merchant_sku, 
+                    MAX(hsn_sac_code) as hsn_sac_code, 
+                    MAX(gst_rate) as gst_rate, 
+                    MAX(declared_value_per_unit) as declared_value_per_unit,
+                    MAX(fc) as fc
+             FROM transit_shipment_data 
+             WHERE merchant_sku IN (${placeholders}) 
+             GROUP BY merchant_sku`,
+            skuList
+        );
+        connection.release();
+
+        return successResponse(res, "Manifest details fetched successfully", rows, 200);
+    } catch (error) {
+        console.error("Get Manifest Details Error:", error);
+        return errorResponse(res, "Failed to fetch manifest details", 500);
+    }
+};
+
 module.exports = {
     uploadCalculationReport,
     addManualCalculationRow,
@@ -539,5 +558,6 @@ module.exports = {
     getCalculationData,
     updateMasterData,
     updateItemFinalWh,
-    resetFinalWh
+    resetFinalWh,
+    getManifestDetails
 };

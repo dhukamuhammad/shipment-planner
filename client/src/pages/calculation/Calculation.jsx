@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Search, Download, CalendarDays, Truck, Layers, Package,
     Plus, Upload, SlidersHorizontal, X, Loader2, UploadCloud,
@@ -8,6 +9,7 @@ import {
 import api from '../../services/api';
 
 const Calculation = () => {
+    const navigate = useNavigate();
     // --- States ---
     const [searchTerm, setSearchTerm] = useState("");
     const [calculationData, setCalculationData] = useState([]);
@@ -130,13 +132,13 @@ const Calculation = () => {
             alert("Failed to delete row.");
         }
     };
-
     // --- MODAL EDIT HANDLERS ---
     const startEditing = (row) => {
         setEditFormData({
             id: row.id,
             groupName: row.group_name, sku: row.sku, title: row.title,
-            category: row.category, hsn: row.hsn, gst: row.gst, cost: row.cost
+            category: row.category, hsn: row.hsn, gst: row.gst, cost: row.cost,
+            weight: row.weight // 🔥 Naya add kiya
         });
         setIsEditModalOpen(true);
     };
@@ -155,6 +157,7 @@ const Calculation = () => {
                 group_name: editFormData.groupName, sku: editFormData.sku,
                 title: editFormData.title, category: editFormData.category,
                 hsn: editFormData.hsn, gst: editFormData.gst, cost: editFormData.cost,
+                weight: editFormData.weight, // 🔥 Naya add kiya
                 ref_sku: editFormData.sku, ref_title: editFormData.title
             } : row));
             setIsEditModalOpen(false);
@@ -277,12 +280,20 @@ const Calculation = () => {
             // 🔥 NAYA LOGIC: Agar manual flag true hai, to Database wali value use karo, warna Formula wali
             const displayFinalWh = item.is_manual_final_wh ? item.final_wh : calculatedFinalWh;
 
+            // Formula: =IF(FinalWH="","",FinalWH*Weight)
+            let totalWeight = "";
+            if (displayFinalWh !== "" && displayFinalWh !== null && displayFinalWh !== undefined) {
+                const weight = Number(item.weight) || 0;
+                totalWeight = Number(displayFinalWh) * weight;
+            }
+
             return {
                 ...item,
                 ship_wh: shipWh,
                 int_wh: intWh,
                 dec_wh: decWh,
-                final_wh: displayFinalWh // Final column me ye value jayegi
+                final_wh: displayFinalWh, // Final column me ye value jayegi
+                total_weight: totalWeight
             };
         });
     }, [calculationData, masterData.afs_days, masterData.shipment_plan_days, masterData.bunch_qty]);
@@ -297,6 +308,7 @@ const Calculation = () => {
 
     // Filter Logic for Search Bar
     const filteredData = displayData.filter(item =>
+        (item.group_name && item.group_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (item.sku && item.sku.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (item.title && item.title.toLowerCase().includes(searchTerm.toLowerCase()))
     );
@@ -330,15 +342,16 @@ const Calculation = () => {
 
     const tableRef = useRef(null);
 
-    // Sabhi visible columns ki widths ka total sum nikalne ke liye (table ki asli width set karne ke liye)
     const calculateTotalTableWidth = () => {
         const w = colWidthsRef.current;
-        let total = 0;
-        total += collapsedGroups.product ? 40 : (w.group_name + w.sku + w.title + w.category);
-        total += collapsedGroups.initialWH ? 40 : (w.int_wh + w.dec_wh + w.non_apron_qty);
-        total += collapsedGroups.variants ? 40 : (w.sky_blue + w.dark_blue + w.brown + w.green + w.tan + w.black + w.red + w.grey);
-        total += collapsedGroups.specs ? 40 : (w.weight + w.total_weight + w.hsn + w.gst + w.cost);
-        total += collapsedGroups.logistics ? 40 : (w.ref_sku + w.ref_title + w.tra_qty + w.quantity + w.available_qty + w.fc_id + w.sale_total + w.sale_wh + w.ship_wh + w.sum_val + w.final_wh);
+        let total = 80; // Action column base width
+
+        if (productSpan > 0) total += collapsedGroups.product ? 40 : ((visibleColumns.group_name ? w.group_name : 0) + (visibleColumns.sku ? w.sku : 0) + (visibleColumns.title ? w.title : 0) + (visibleColumns.category ? w.category : 0));
+        if (initWHSpan > 0) total += collapsedGroups.initialWH ? 40 : ((visibleColumns.int_wh ? w.int_wh : 0) + (visibleColumns.dec_wh ? w.dec_wh : 0) + (visibleColumns.non_apron_qty ? w.non_apron_qty : 0));
+        if (variantsSpan > 0) total += collapsedGroups.variants ? 40 : ((visibleColumns.sky_blue ? w.sky_blue : 0) + (visibleColumns.dark_blue ? w.dark_blue : 0) + (visibleColumns.brown ? w.brown : 0) + (visibleColumns.green ? w.green : 0) + (visibleColumns.tan ? w.tan : 0) + (visibleColumns.black ? w.black : 0) + (visibleColumns.red ? w.red : 0) + (visibleColumns.grey ? w.grey : 0));
+        if (specsSpan > 0) total += collapsedGroups.specs ? 40 : ((visibleColumns.weight ? w.weight : 0) + (visibleColumns.total_weight ? w.total_weight : 0) + (visibleColumns.hsn ? w.hsn : 0) + (visibleColumns.gst ? w.gst : 0) + (visibleColumns.cost ? w.cost : 0));
+        if (logisticsSpan > 0) total += collapsedGroups.logistics ? 40 : ((visibleColumns.ref_sku ? w.ref_sku : 0) + (visibleColumns.ref_title ? w.ref_title : 0) + (visibleColumns.tra_qty ? w.tra_qty : 0) + (visibleColumns.quantity ? w.quantity : 0) + (visibleColumns.available_qty ? w.available_qty : 0) + (visibleColumns.fc_id ? w.fc_id : 0) + (visibleColumns.sale_total ? w.sale_total : 0) + (visibleColumns.sale_wh ? w.sale_wh : 0) + (visibleColumns.ship_wh ? w.ship_wh : 0) + (visibleColumns.sum_val ? w.sum_val : 0) + (visibleColumns.final_wh ? w.final_wh : 0));
+
         return total;
     };
 
@@ -410,6 +423,28 @@ const Calculation = () => {
     const specsSpan = getColSpan(['weight', 'total_weight', 'hsn', 'gst', 'cost']);
     const logisticsSpan = getColSpan(['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', 'fc_id', 'sale_total', 'sale_wh', 'ship_wh', 'sum_val', 'final_wh']);
 
+    // 🔥 NAYA: Group Checkbox Toggle Logic
+    const colGroupsConfig = {
+        product: ['group_name', 'sku', 'title', 'category'],
+        initialWH: ['int_wh', 'dec_wh', 'non_apron_qty'],
+        variants: ['sky_blue', 'dark_blue', 'brown', 'green', 'tan', 'black', 'red', 'grey'],
+        specs: ['weight', 'total_weight', 'hsn', 'gst', 'cost'],
+        logistics: ['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', 'fc_id', 'sale_total', 'sale_wh', 'ship_wh', 'sum_val', 'final_wh']
+    };
+
+    const handleGroupToggle = (groupKey, isChecked) => {
+        const keys = colGroupsConfig[groupKey];
+        setVisibleColumns(prev => {
+            const newState = { ...prev };
+            keys.forEach(k => newState[k] = isChecked);
+            return newState;
+        });
+    };
+
+
+
+
+
     return (
         <div className="space-y-3 relative pb-2">
             {/* COMPACT HEADER SECTION */}
@@ -432,8 +467,25 @@ const Calculation = () => {
                         <Plus size={12} /> Add SKU
                     </button>
                     <div className="hidden md:block w-px h-4 bg-[#D9DDE5] mx-0.5"></div>
-                    <button className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#D9DDE5] rounded-[4px] text-[11px] font-semibold text-[#1C2340] hover:bg-[#F4F5F7] shadow-sm">
-                        <Download size={12} /> Export
+                    <button
+                        onClick={() => {
+                            // Sirf wo SKUs bhejo jinka Final-WH value 0 se zyada hai
+                            const manifestSkus = filteredData
+                                .filter(item => Number(item.final_wh) > 0)
+                                .map(item => ({
+                                    sku: item.sku,
+                                    quantity: item.final_wh,
+                                    fc: item.fulfilment_id,
+                                    hsn_sac_code: item.hsn,
+                                    gst_rate: item.gst,
+                                    declared_value_per_unit: item.cost
+                                }));
+                            navigate('/manifest', { state: { manifestSkus } });
+                        }}
+                        title="Final-WH wale SKUs ka manifest banayein"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#D9DDE5] rounded-[4px] text-[11px] font-semibold text-[#1C2340] hover:bg-[#F4F5F7] shadow-sm"
+                    >
+                        <Package size={12} /> Generate Manifest
                     </button>
                 </div>
             </div>
@@ -526,173 +578,117 @@ const Calculation = () => {
                     ) : (
                         <table ref={typeof tableRef !== 'undefined' ? tableRef : null} className="text-left whitespace-nowrap" style={typeof calculateTotalTableWidth === 'function' ? { width: calculateTotalTableWidth() } : { minWidth: "2500px" }}>
 
-                            {/* 🔥 COLGROUP: Core column widths control */}
+                            {/* 🔥 COLGROUP */}
                             <colgroup>
-                                {/* Action Column ColGroup — Sabse pehle */}
                                 <col style={{ width: 64 }} />
 
-                                {collapsedGroups.product ? (
-                                    <col style={{ width: 40 }} />
-                                ) : (
-                                    <>
-                                        {visibleColumns.group_name && <col ref={el => colRefs.current.group_name = el} style={{ width: colWidthsRef.current.group_name }} />}
-                                        {visibleColumns.sku && <col ref={el => colRefs.current.sku = el} style={{ width: colWidthsRef.current.sku }} />}
-                                        {visibleColumns.title && <col ref={el => colRefs.current.title = el} style={{ width: colWidthsRef.current.title }} />}
-                                        {visibleColumns.category && <col ref={el => colRefs.current.category = el} style={{ width: colWidthsRef.current.category }} />}
-                                    </>
-                                )}
-                                {collapsedGroups.initialWH ? (
-                                    <col style={{ width: 40 }} />
-                                ) : (
-                                    <>
-                                        {visibleColumns.int_wh && <col ref={el => colRefs.current.int_wh = el} style={{ width: colWidthsRef.current.int_wh }} />}
-                                        {visibleColumns.dec_wh && <col ref={el => colRefs.current.dec_wh = el} style={{ width: colWidthsRef.current.dec_wh }} />}
-                                        {visibleColumns.non_apron_qty && <col ref={el => colRefs.current.non_apron_qty = el} style={{ width: colWidthsRef.current.non_apron_qty }} />}
-                                    </>
-                                )}
-                                {collapsedGroups.variants ? (
-                                    <col style={{ width: 40 }} />
-                                ) : (
-                                    <>
-                                        {visibleColumns.sky_blue && <col ref={el => colRefs.current.sky_blue = el} style={{ width: colWidthsRef.current.sky_blue }} />}
-                                        {visibleColumns.dark_blue && <col ref={el => colRefs.current.dark_blue = el} style={{ width: colWidthsRef.current.dark_blue }} />}
-                                        {visibleColumns.brown && <col ref={el => colRefs.current.brown = el} style={{ width: colWidthsRef.current.brown }} />}
-                                        {visibleColumns.green && <col ref={el => colRefs.current.green = el} style={{ width: colWidthsRef.current.green }} />}
-                                        {visibleColumns.tan && <col ref={el => colRefs.current.tan = el} style={{ width: colWidthsRef.current.tan }} />}
-                                        {visibleColumns.black && <col ref={el => colRefs.current.black = el} style={{ width: colWidthsRef.current.black }} />}
-                                        {visibleColumns.red && <col ref={el => colRefs.current.red = el} style={{ width: colWidthsRef.current.red }} />}
-                                        {visibleColumns.grey && <col ref={el => colRefs.current.grey = el} style={{ width: colWidthsRef.current.grey }} />}
-                                    </>
-                                )}
-                                {collapsedGroups.specs ? (
-                                    <col style={{ width: 40 }} />
-                                ) : (
-                                    <>
-                                        {visibleColumns.weight && <col ref={el => colRefs.current.weight = el} style={{ width: colWidthsRef.current.weight }} />}
-                                        {visibleColumns.total_weight && <col ref={el => colRefs.current.total_weight = el} style={{ width: colWidthsRef.current.total_weight }} />}
-                                        {visibleColumns.hsn && <col ref={el => colRefs.current.hsn = el} style={{ width: colWidthsRef.current.hsn }} />}
-                                        {visibleColumns.gst && <col ref={el => colRefs.current.gst = el} style={{ width: colWidthsRef.current.gst }} />}
-                                        {visibleColumns.cost && <col ref={el => colRefs.current.cost = el} style={{ width: colWidthsRef.current.cost }} />}
-                                    </>
-                                )}
-                                {collapsedGroups.logistics ? (
-                                    <col style={{ width: 40 }} />
-                                ) : (
-                                    <>
-                                        {visibleColumns.ref_sku && <col ref={el => colRefs.current.ref_sku = el} style={{ width: colWidthsRef.current.ref_sku }} />}
-                                        {visibleColumns.ref_title && <col ref={el => colRefs.current.ref_title = el} style={{ width: colWidthsRef.current.ref_title }} />}
-                                        {visibleColumns.tra_qty && <col ref={el => colRefs.current.tra_qty = el} style={{ width: colWidthsRef.current.tra_qty }} />}
-                                        {visibleColumns.quantity && <col ref={el => colRefs.current.quantity = el} style={{ width: colWidthsRef.current.quantity }} />}
-                                        {visibleColumns.available_qty && <col ref={el => colRefs.current.available_qty = el} style={{ width: colWidthsRef.current.available_qty }} />}
-                                        {visibleColumns.fc_id && <col ref={el => colRefs.current.fc_id = el} style={{ width: colWidthsRef.current.fc_id }} />}
-                                        {visibleColumns.sale_total && <col ref={el => colRefs.current.sale_total = el} style={{ width: colWidthsRef.current.sale_total }} />}
-                                        {visibleColumns.sale_wh && <col ref={el => colRefs.current.sale_wh = el} style={{ width: colWidthsRef.current.sale_wh }} />}
-                                        {visibleColumns.ship_wh && <col ref={el => colRefs.current.ship_wh = el} style={{ width: colWidthsRef.current.ship_wh }} />}
-                                        {visibleColumns.sum_val && <col ref={el => colRefs.current.sum_val = el} style={{ width: colWidthsRef.current.sum_val }} />}
-                                        {visibleColumns.final_wh && <col ref={el => colRefs.current.final_wh = el} style={{ width: colWidthsRef.current.final_wh }} />}
-                                    </>
-                                )}
+                                {productSpan > 0 && (collapsedGroups.product ? <col style={{ width: 40 }} /> : <>
+                                    {visibleColumns.group_name && <col ref={el => colRefs.current.group_name = el} style={{ width: colWidthsRef.current.group_name }} />}
+                                    {visibleColumns.sku && <col ref={el => colRefs.current.sku = el} style={{ width: colWidthsRef.current.sku }} />}
+                                    {visibleColumns.title && <col ref={el => colRefs.current.title = el} style={{ width: colWidthsRef.current.title }} />}
+                                    {visibleColumns.category && <col ref={el => colRefs.current.category = el} style={{ width: colWidthsRef.current.category }} />}
+                                </>)}
+
+                                {initWHSpan > 0 && (collapsedGroups.initialWH ? <col style={{ width: 40 }} /> : <>
+                                    {visibleColumns.int_wh && <col ref={el => colRefs.current.int_wh = el} style={{ width: colWidthsRef.current.int_wh }} />}
+                                    {visibleColumns.dec_wh && <col ref={el => colRefs.current.dec_wh = el} style={{ width: colWidthsRef.current.dec_wh }} />}
+                                    {visibleColumns.non_apron_qty && <col ref={el => colRefs.current.non_apron_qty = el} style={{ width: colWidthsRef.current.non_apron_qty }} />}
+                                </>)}
+
+                                {variantsSpan > 0 && (collapsedGroups.variants ? <col style={{ width: 40 }} /> : <>
+                                    {visibleColumns.sky_blue && <col ref={el => colRefs.current.sky_blue = el} style={{ width: colWidthsRef.current.sky_blue }} />}
+                                    {visibleColumns.dark_blue && <col ref={el => colRefs.current.dark_blue = el} style={{ width: colWidthsRef.current.dark_blue }} />}
+                                    {visibleColumns.brown && <col ref={el => colRefs.current.brown = el} style={{ width: colWidthsRef.current.brown }} />}
+                                    {visibleColumns.green && <col ref={el => colRefs.current.green = el} style={{ width: colWidthsRef.current.green }} />}
+                                    {visibleColumns.tan && <col ref={el => colRefs.current.tan = el} style={{ width: colWidthsRef.current.tan }} />}
+                                    {visibleColumns.black && <col ref={el => colRefs.current.black = el} style={{ width: colWidthsRef.current.black }} />}
+                                    {visibleColumns.red && <col ref={el => colRefs.current.red = el} style={{ width: colWidthsRef.current.red }} />}
+                                    {visibleColumns.grey && <col ref={el => colRefs.current.grey = el} style={{ width: colWidthsRef.current.grey }} />}
+                                </>)}
+
+                                {specsSpan > 0 && (collapsedGroups.specs ? <col style={{ width: 40 }} /> : <>
+                                    {visibleColumns.weight && <col ref={el => colRefs.current.weight = el} style={{ width: colWidthsRef.current.weight }} />}
+                                    {visibleColumns.total_weight && <col ref={el => colRefs.current.total_weight = el} style={{ width: colWidthsRef.current.total_weight }} />}
+                                    {visibleColumns.hsn && <col ref={el => colRefs.current.hsn = el} style={{ width: colWidthsRef.current.hsn }} />}
+                                    {visibleColumns.gst && <col ref={el => colRefs.current.gst = el} style={{ width: colWidthsRef.current.gst }} />}
+                                    {visibleColumns.cost && <col ref={el => colRefs.current.cost = el} style={{ width: colWidthsRef.current.cost }} />}
+                                </>)}
+
+                                {logisticsSpan > 0 && (collapsedGroups.logistics ? <col style={{ width: 40 }} /> : <>
+                                    {visibleColumns.ref_sku && <col ref={el => colRefs.current.ref_sku = el} style={{ width: colWidthsRef.current.ref_sku }} />}
+                                    {visibleColumns.ref_title && <col ref={el => colRefs.current.ref_title = el} style={{ width: colWidthsRef.current.ref_title }} />}
+                                    {visibleColumns.tra_qty && <col ref={el => colRefs.current.tra_qty = el} style={{ width: colWidthsRef.current.tra_qty }} />}
+                                    {visibleColumns.quantity && <col ref={el => colRefs.current.quantity = el} style={{ width: colWidthsRef.current.quantity }} />}
+                                    {visibleColumns.available_qty && <col ref={el => colRefs.current.available_qty = el} style={{ width: colWidthsRef.current.available_qty }} />}
+                                    {visibleColumns.fc_id && <col ref={el => colRefs.current.fc_id = el} style={{ width: colWidthsRef.current.fc_id }} />}
+                                    {visibleColumns.sale_total && <col ref={el => colRefs.current.sale_total = el} style={{ width: colWidthsRef.current.sale_total }} />}
+                                    {visibleColumns.sale_wh && <col ref={el => colRefs.current.sale_wh = el} style={{ width: colWidthsRef.current.sale_wh }} />}
+                                    {visibleColumns.ship_wh && <col ref={el => colRefs.current.ship_wh = el} style={{ width: colWidthsRef.current.ship_wh }} />}
+                                    {visibleColumns.sum_val && <col ref={el => colRefs.current.sum_val = el} style={{ width: colWidthsRef.current.sum_val }} />}
+                                    {visibleColumns.final_wh && <col ref={el => colRefs.current.final_wh = el} style={{ width: colWidthsRef.current.final_wh }} />}
+                                </>)}
                             </colgroup>
 
-                            {/* SMART COLLAPSIBLE & RESIZABLE THEAD */}
+                            {/* SMART THEAD */}
                             <thead className="sticky top-0 z-20 shadow-sm bg-white">
                                 {/* Top Row - Grouped Headers */}
                                 <tr className={`${typeof activeHead !== 'undefined' ? activeHead : 'text-[10px]'} font-bold text-[#1C2340]/60 uppercase tracking-wider border-b border-[#D9DDE5]`}>
+                                    <th rowSpan={2} className="w-16 px-2 py-3 bg-[#1C2340]/5 border-r-2 border-[#D9DDE5] align-bottom text-center text-[#1C2340]/50">• • •</th>
 
-                                    {/* Action Column Header — Sabse pehle */}
-                                    <th rowSpan={2} className="w-16 px-2 py-3 bg-[#1C2340]/5 border-r-2 border-[#D9DDE5] align-bottom text-center text-[#1C2340]/50">
-                                        •••
-                                    </th>
-
-                                    {/* 1. Product Identification */}
-                                    {collapsedGroups.product ? (
+                                    {productSpan > 0 && (collapsedGroups.product ? (
                                         <th rowSpan={2} className="w-6 py-2 bg-[#F4F5F7] border-r border-b-2 border-[#D9DDE5] align-top">
-                                            <div className="flex flex-col items-center gap-1.5">
-                                                <button onClick={() => toggleGroup('product')} className="p-0.5 hover:bg-black/10 rounded transition-colors"><ChevronRight size={12} title="Expand" /></button>
-                                                <span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>PRODUCT</span>
-                                            </div>
+                                            <div className="flex flex-col items-center gap-1.5"><button onClick={() => toggleGroup('product')} className="p-0.5 hover:bg-black/10 rounded"><ChevronRight size={12} /></button><span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>PRODUCT</span></div>
                                         </th>
-                                    ) : productSpan > 0 && (
-                                        <th className="px-4 py-3 bg-[#F4F5F7]" colSpan={typeof productSpan !== 'undefined' ? productSpan : 4}>
-                                            <div className="flex items-center justify-between">
-                                                <span>Product Identification</span>
-                                                <button onClick={() => toggleGroup('product')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button>
-                                            </div>
+                                    ) : (
+                                        <th className="px-4 py-3 bg-[#F4F5F7]" colSpan={productSpan}>
+                                            <div className="flex items-center justify-between"><span>Product Identification</span><button onClick={() => toggleGroup('product')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button></div>
                                         </th>
-                                    )}
+                                    ))}
 
-                                    {/* 2. Initial WH Quantities */}
-                                    {collapsedGroups.initialWH ? (
+                                    {initWHSpan > 0 && (collapsedGroups.initialWH ? (
                                         <th rowSpan={2} className="w-6 py-2 bg-blue-50 border-l border-r border-b-2 border-[#D9DDE5]/50 align-top">
-                                            <div className="flex flex-col items-center gap-1.5">
-                                                <button onClick={() => toggleGroup('initialWH')} className="p-0.5 hover:bg-black/10 rounded transition-colors"><ChevronRight size={12} /></button>
-                                                <span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>INITIAL WH</span>
-                                            </div>
+                                            <div className="flex flex-col items-center gap-1.5"><button onClick={() => toggleGroup('initialWH')} className="p-0.5 hover:bg-black/10 rounded"><ChevronRight size={12} /></button><span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>INITIAL WH</span></div>
                                         </th>
-                                    ) : initWHSpan > 0 && (
-                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-blue-50" colSpan={typeof initWHSpan !== 'undefined' ? initWHSpan : 3}>
-                                            <div className="flex items-center justify-between">
-                                                <span>Initial WH Quantities</span>
-                                                <button onClick={() => toggleGroup('initialWH')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button>
-                                            </div>
+                                    ) : (
+                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-blue-50" colSpan={initWHSpan}>
+                                            <div className="flex items-center justify-between"><span>Initial WH Quantities</span><button onClick={() => toggleGroup('initialWH')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button></div>
                                         </th>
-                                    )}
+                                    ))}
 
-                                    {/* 3. Variant Breakdown */}
-                                    {collapsedGroups.variants ? (
+                                    {variantsSpan > 0 && (collapsedGroups.variants ? (
                                         <th rowSpan={2} className="w-6 py-2 bg-purple-50 border-l border-r border-b-2 border-[#D9DDE5]/50 align-top">
-                                            <div className="flex flex-col items-center gap-1.5">
-                                                <button onClick={() => toggleGroup('variants')} className="p-0.5 hover:bg-black/10 rounded transition-colors"><ChevronRight size={12} /></button>
-                                                <span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>VARIANTS</span>
-                                            </div>
+                                            <div className="flex flex-col items-center gap-1.5"><button onClick={() => toggleGroup('variants')} className="p-0.5 hover:bg-black/10 rounded"><ChevronRight size={12} /></button><span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>VARIANTS</span></div>
                                         </th>
-                                    ) : variantsSpan > 0 && (
-                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-purple-50" colSpan={typeof variantsSpan !== 'undefined' ? variantsSpan : 8}>
-                                            <div className="flex items-center justify-between">
-                                                <span>Variant Breakdown</span>
-                                                <button onClick={() => toggleGroup('variants')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button>
-                                            </div>
+                                    ) : (
+                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-purple-50" colSpan={variantsSpan}>
+                                            <div className="flex items-center justify-between"><span>Variant Breakdown</span><button onClick={() => toggleGroup('variants')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button></div>
                                         </th>
-                                    )}
+                                    ))}
 
-                                    {/* 4. Specs & Financials */}
-                                    {collapsedGroups.specs ? (
+                                    {specsSpan > 0 && (collapsedGroups.specs ? (
                                         <th rowSpan={2} className="w-6 py-2 bg-green-50 border-l border-r border-b-2 border-[#D9DDE5]/50 align-top">
-                                            <div className="flex flex-col items-center gap-1.5">
-                                                <button onClick={() => toggleGroup('specs')} className="p-0.5 hover:bg-black/10 rounded transition-colors"><ChevronRight size={12} /></button>
-                                                <span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>SPECS</span>
-                                            </div>
+                                            <div className="flex flex-col items-center gap-1.5"><button onClick={() => toggleGroup('specs')} className="p-0.5 hover:bg-black/10 rounded"><ChevronRight size={12} /></button><span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>SPECS</span></div>
                                         </th>
-                                    ) : specsSpan > 0 && (
-                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-green-50" colSpan={typeof specsSpan !== 'undefined' ? specsSpan : 5}>
-                                            <div className="flex items-center justify-between">
-                                                <span>Specs & Financials</span>
-                                                <button onClick={() => toggleGroup('specs')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button>
-                                            </div>
+                                    ) : (
+                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-green-50" colSpan={specsSpan}>
+                                            <div className="flex items-center justify-between"><span>Specs & Financials</span><button onClick={() => toggleGroup('specs')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button></div>
                                         </th>
-                                    )}
+                                    ))}
 
-                                    {/* 5. Logistics & Calculation */}
-                                    {collapsedGroups.logistics ? (
+                                    {logisticsSpan > 0 && (collapsedGroups.logistics ? (
                                         <th rowSpan={2} className="w-6 py-2 bg-orange-50 border-l border-r border-b-2 border-[#D9DDE5]/50 align-top">
-                                            <div className="flex flex-col items-center gap-1.5">
-                                                <button onClick={() => toggleGroup('logistics')} className="p-0.5 hover:bg-black/10 rounded transition-colors"><ChevronRight size={12} /></button>
-                                                <span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>LOGISTICS</span>
-                                            </div>
+                                            <div className="flex flex-col items-center gap-1.5"><button onClick={() => toggleGroup('logistics')} className="p-0.5 hover:bg-black/10 rounded"><ChevronRight size={12} /></button><span className="text-[9px] tracking-[0.1em]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>LOGISTICS</span></div>
                                         </th>
-                                    ) : logisticsSpan > 0 && (
-                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-orange-50" colSpan={typeof logisticsSpan !== 'undefined' ? logisticsSpan : 11}>
-                                            <div className="flex items-center justify-between">
-                                                <span>Logistics & Calculation</span>
-                                                <button onClick={() => toggleGroup('logistics')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button>
-                                            </div>
+                                    ) : (
+                                        <th className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-orange-50" colSpan={logisticsSpan}>
+                                            <div className="flex items-center justify-between"><span>Logistics & Calculation</span><button onClick={() => toggleGroup('logistics')} className="p-0.5 hover:bg-black/10 rounded"><ChevronLeft size={14} /></button></div>
                                         </th>
-                                    )}
+                                    ))}
                                 </tr>
 
-                                {/* Bottom Row - Specific Headers with Always-Visible Resizers */}
+                                {/* Bottom Row - Specific Headers */}
                                 <tr className={`${typeof activeSubHead !== 'undefined' ? activeSubHead : 'text-[11px]'} font-semibold text-[#1C2340] border-b-2 border-[#D9DDE5] bg-white relative z-10`}>
-                                    {!collapsedGroups.product && (
+                                    {productSpan > 0 && !collapsedGroups.product && (
                                         <>
                                             {visibleColumns.group_name && <th style={{ width: colWidthsRef.current.group_name, minWidth: colWidthsRef.current.group_name }} className="px-4 py-3 bg-white relative group">Group Name<div onMouseDown={handleResizeMouseDown('group_name')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30 transition-colors" /></th>}
                                             {visibleColumns.sku && <th style={{ width: colWidthsRef.current.sku, minWidth: colWidthsRef.current.sku }} className="px-4 py-3 bg-white relative group">SKU<div onMouseDown={handleResizeMouseDown('sku')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30 transition-colors" /></th>}
@@ -701,7 +697,7 @@ const Calculation = () => {
                                         </>
                                     )}
 
-                                    {!collapsedGroups.initialWH && (
+                                    {initWHSpan > 0 && !collapsedGroups.initialWH && (
                                         <>
                                             {visibleColumns.int_wh && <th style={{ width: colWidthsRef.current.int_wh, minWidth: colWidthsRef.current.int_wh }} className="px-4 py-3 text-center border-l border-[#D9DDE5]/50 bg-blue-50 relative group">Int - WH<div onMouseDown={handleResizeMouseDown('int_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30" /></th>}
                                             {visibleColumns.dec_wh && <th style={{ width: colWidthsRef.current.dec_wh, minWidth: colWidthsRef.current.dec_wh }} className="px-4 py-3 text-center bg-blue-50 relative group">Dec - WH<div onMouseDown={handleResizeMouseDown('dec_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30" /></th>}
@@ -709,7 +705,7 @@ const Calculation = () => {
                                         </>
                                     )}
 
-                                    {!collapsedGroups.variants && (
+                                    {variantsSpan > 0 && !collapsedGroups.variants && (
                                         <>
                                             {visibleColumns.sky_blue && <th style={{ width: colWidthsRef.current.sky_blue, minWidth: colWidthsRef.current.sky_blue }} className="px-3 py-3 text-center border-l border-[#D9DDE5]/50 bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#38BDF8]"></span>Sky Blue</div><div onMouseDown={handleResizeMouseDown('sky_blue')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                             {visibleColumns.dark_blue && <th style={{ width: colWidthsRef.current.dark_blue, minWidth: colWidthsRef.current.dark_blue }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#1E40AF]"></span>Dark Blue</div><div onMouseDown={handleResizeMouseDown('dark_blue')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
@@ -722,7 +718,7 @@ const Calculation = () => {
                                         </>
                                     )}
 
-                                    {!collapsedGroups.specs && (
+                                    {specsSpan > 0 && !collapsedGroups.specs && (
                                         <>
                                             {visibleColumns.weight && <th style={{ width: colWidthsRef.current.weight, minWidth: colWidthsRef.current.weight }} className="px-4 py-3 text-center border-l border-[#D9DDE5]/50 bg-green-50 relative group">Weight<div onMouseDown={handleResizeMouseDown('weight')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                             {visibleColumns.total_weight && <th style={{ width: colWidthsRef.current.total_weight, minWidth: colWidthsRef.current.total_weight }} className="px-4 py-3 text-center bg-green-50 relative group">Total Weight<div onMouseDown={handleResizeMouseDown('total_weight')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
@@ -732,7 +728,7 @@ const Calculation = () => {
                                         </>
                                     )}
 
-                                    {!collapsedGroups.logistics && (
+                                    {logisticsSpan > 0 && !collapsedGroups.logistics && (
                                         <>
                                             {visibleColumns.ref_sku && <th style={{ width: colWidthsRef.current.ref_sku, minWidth: colWidthsRef.current.ref_sku }} className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-orange-50 font-semibold text-[#1C2340] relative group">SKU (Ref)<div onMouseDown={handleResizeMouseDown('ref_sku')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                             {visibleColumns.ref_title && <th style={{ width: colWidthsRef.current.ref_title, minWidth: colWidthsRef.current.ref_title, maxWidth: colWidthsRef.current.ref_title }} className="px-4 py-3 bg-orange-50 font-semibold text-[#1C2340] relative group">Title (Ref)<div onMouseDown={handleResizeMouseDown('ref_title')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
@@ -749,9 +745,9 @@ const Calculation = () => {
                                     )}
                                 </tr>
                             </thead>
+
                             <tbody className="bg-white">
                                 {filteredData.map((row) => {
-                                    // REAL-TIME EXCEL MATH
                                     const liveAfsDays = Number(masterData.afs_days) || 0;
                                     const livePlanDays = Number(masterData.shipment_plan_days) || 0;
 
@@ -759,43 +755,33 @@ const Calculation = () => {
                                     if (liveAfsDays > 0) {
                                         liveShipWh = Math.ceil(((row.sale_wh / liveAfsDays) * livePlanDays) - row.available_qty);
                                     }
+                                    const liveTotalWeight = row.final_wh !== "" ? (Number(row.final_wh) || 0) * (Number(row.weight) || 0) : "";
 
                                     return (
                                         <tr key={row.id} className={`group hover:bg-[#F4F5F7]/80 transition-colors text-[#1C2340]/80 ${typeof activeText !== 'undefined' ? activeText : 'text-xs'}`}>
 
-                                            {/* Action Column Cell — Sabse pehle, icons sirf row hover pe dikhenge */}
+                                            {/* Action Column Cell */}
                                             <td className="w-16 px-2 py-3 text-center bg-white border-r-2 border-[#D9DDE5]">
                                                 <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <button onClick={() => startEditing(row)} title="Edit SKU" className="p-1 text-[#5A5DF6] hover:bg-[#5A5DF6]/10 rounded transition-colors">
-                                                        <Pencil size={13} />
-                                                    </button>
-                                                    <button onClick={() => handleDeleteRow(row.id)} title="Delete Row" className="p-1 text-[#E74C3C] hover:bg-[#E74C3C]/10 rounded transition-colors">
-                                                        <Trash2 size={13} />
-                                                    </button>
+                                                    <button onClick={() => startEditing(row)} title="Edit SKU" className="p-1 text-[#5A5DF6] hover:bg-[#5A5DF6]/10 rounded transition-colors"><Pencil size={13} /></button>
+                                                    <button onClick={() => handleDeleteRow(row.id)} title="Delete Row" className="p-1 text-[#E74C3C] hover:bg-[#E74C3C]/10 rounded transition-colors"><Trash2 size={13} /></button>
                                                 </div>
                                             </td>
 
-                                            {/* 1. Product Identification Cells */}
-                                            {collapsedGroups.product ? (
+                                            {/* 1. Product Cells */}
+                                            {productSpan > 0 && (collapsedGroups.product ? (
                                                 <td className="bg-[#F4F5F7]/40 border-r border-[#D9DDE5]/40"></td>
                                             ) : (
                                                 <>
                                                     {visibleColumns.group_name && <td style={{ width: colWidthsRef.current.group_name, minWidth: colWidthsRef.current.group_name }} className="px-4 py-3 font-semibold text-[#1C2340]">{row.group_name}</td>}
                                                     {visibleColumns.sku && <td style={{ width: colWidthsRef.current.sku, minWidth: colWidthsRef.current.sku }} className="px-4 py-3"><span className="bg-[#F4F5F7] border border-[#D9DDE5] px-2 py-1 rounded-[3px] font-medium">{row.sku}</span></td>}
-                                                    {visibleColumns.title && <td
-                                                        onDoubleClick={() => handleDoubleClick(row.id, 'title')}
-                                                        style={{ width: colWidthsRef.current.title, minWidth: colWidthsRef.current.title, maxWidth: colWidthsRef.current.title }}
-                                                        className={`px-4 py-3 cursor-pointer transition-all duration-300 ${expandedCell?.rowId === row.id && expandedCell?.colName === 'title' ? 'whitespace-normal break-words bg-white shadow-sm' : 'truncate'}`}
-                                                        title="Double click to expand"
-                                                    >
-                                                        {row.title}
-                                                    </td>}
+                                                    {visibleColumns.title && <td onDoubleClick={() => handleDoubleClick(row.id, 'title')} style={{ width: colWidthsRef.current.title, minWidth: colWidthsRef.current.title, maxWidth: colWidthsRef.current.title }} className={`px-4 py-3 cursor-pointer transition-all duration-300 ${expandedCell?.rowId === row.id && expandedCell?.colName === 'title' ? 'whitespace-normal break-words bg-white shadow-sm' : 'truncate'}`} title="Double click to expand">{row.title}</td>}
                                                     {visibleColumns.category && <td style={{ width: colWidthsRef.current.category, minWidth: colWidthsRef.current.category }} className="px-4 py-3">{row.category}</td>}
                                                 </>
-                                            )}
+                                            ))}
 
                                             {/* 2. Initial WH Cells */}
-                                            {collapsedGroups.initialWH ? (
+                                            {initWHSpan > 0 && (collapsedGroups.initialWH ? (
                                                 <td className="bg-blue-50/20 border-r border-[#D9DDE5]/40"></td>
                                             ) : (
                                                 <>
@@ -803,10 +789,10 @@ const Calculation = () => {
                                                     {visibleColumns.dec_wh && <td style={{ width: colWidthsRef.current.dec_wh, minWidth: colWidthsRef.current.dec_wh }} className="px-4 py-3 text-center">{row.dec_wh}</td>}
                                                     {visibleColumns.non_apron_qty && <td style={{ width: colWidthsRef.current.non_apron_qty, minWidth: colWidthsRef.current.non_apron_qty }} className="px-4 py-3 text-center">{row.non_apron_qty}</td>}
                                                 </>
-                                            )}
+                                            ))}
 
-                                            {/* 3. Variants Mapping Cells */}
-                                            {collapsedGroups.variants ? (
+                                            {/* 3. Variants Cells */}
+                                            {variantsSpan > 0 && (collapsedGroups.variants ? (
                                                 <td className="bg-purple-50/20 border-r border-[#D9DDE5]/40"></td>
                                             ) : (
                                                 <>
@@ -819,72 +805,46 @@ const Calculation = () => {
                                                     {visibleColumns.red && <td style={{ width: colWidthsRef.current.red, minWidth: colWidthsRef.current.red }} className="px-3 py-3 text-center">{row.apr_red ? <span className="font-bold text-[#E74C3C] bg-[#E74C3C]/10 px-2 py-0.5 rounded-[3px]">{row.apr_red}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
                                                     {visibleColumns.grey && <td style={{ width: colWidthsRef.current.grey, minWidth: colWidthsRef.current.grey }} className="px-3 py-3 text-center">{row.apr_grey ? <span className="font-bold text-[#9CA3AF] bg-[#9CA3AF]/10 px-2 py-0.5 rounded-[3px]">{row.apr_grey}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
                                                 </>
-                                            )}
+                                            ))}
 
                                             {/* 4. Specs & Financials Cells */}
-                                            {collapsedGroups.specs ? (
+                                            {specsSpan > 0 && (collapsedGroups.specs ? (
                                                 <td className="bg-green-50/20 border-r border-[#D9DDE5]/40"></td>
                                             ) : (
                                                 <>
                                                     {visibleColumns.weight && <td style={{ width: colWidthsRef.current.weight, minWidth: colWidthsRef.current.weight }} className="px-4 py-3 text-center border-l border-[#D9DDE5]/30">{row.weight}</td>}
-                                                    {visibleColumns.total_weight && <td style={{ width: colWidthsRef.current.total_weight, minWidth: colWidthsRef.current.total_weight }} className="px-4 py-3 text-center">{row.total_weight}</td>}
+                                                    {visibleColumns.total_weight && <td style={{ width: colWidthsRef.current.total_weight, minWidth: colWidthsRef.current.total_weight }} className="px-4 py-3 text-center font-medium">{liveTotalWeight !== "" ? Number(liveTotalWeight).toFixed(2) : "-"}</td>}
                                                     {visibleColumns.hsn && <td style={{ width: colWidthsRef.current.hsn, minWidth: colWidthsRef.current.hsn }} className="px-4 py-3 text-center">{row.hsn || '-'}</td>}
                                                     {visibleColumns.gst && <td style={{ width: colWidthsRef.current.gst, minWidth: colWidthsRef.current.gst }} className="px-4 py-3 text-center">{row.gst || '-'}</td>}
                                                     {visibleColumns.cost && <td style={{ width: colWidthsRef.current.cost, minWidth: colWidthsRef.current.cost }} className="px-4 py-3 text-center font-bold text-[#22B573]">₹{row.cost}</td>}
                                                 </>
-                                            )}
+                                            ))}
 
-                                            {/* 5. Logistics & Calculation Cells */}
-                                            {collapsedGroups.logistics ? (
+                                            {/* 5. Logistics Cells */}
+                                            {logisticsSpan > 0 && (collapsedGroups.logistics ? (
                                                 <td className="bg-orange-50/20 border-r border-[#D9DDE5]/40"></td>
                                             ) : (
                                                 <>
                                                     {visibleColumns.ref_sku && <td style={{ width: colWidthsRef.current.ref_sku, minWidth: colWidthsRef.current.ref_sku }} className="px-4 py-3 border-l border-[#D9DDE5]/30 font-medium truncate">{row.ref_sku}</td>}
-                                                    {visibleColumns.ref_title && <td
-                                                        onDoubleClick={() => handleDoubleClick(row.id, 'ref_title')}
-                                                        style={{ width: colWidthsRef.current.ref_title, minWidth: colWidthsRef.current.ref_title, maxWidth: colWidthsRef.current.ref_title }}
-                                                        className={`px-4 py-3 font-medium cursor-pointer transition-all duration-300 ${expandedCell?.rowId === row.id && expandedCell?.colName === 'ref_title' ? 'whitespace-normal break-words bg-white shadow-sm' : 'truncate'}`}
-                                                        title="Double click to expand"
-                                                    >
-                                                        {row.ref_title}
-                                                    </td>}
+                                                    {visibleColumns.ref_title && <td onDoubleClick={() => handleDoubleClick(row.id, 'ref_title')} style={{ width: colWidthsRef.current.ref_title, minWidth: colWidthsRef.current.ref_title, maxWidth: colWidthsRef.current.ref_title }} className={`px-4 py-3 font-medium cursor-pointer transition-all duration-300 ${expandedCell?.rowId === row.id && expandedCell?.colName === 'ref_title' ? 'whitespace-normal break-words bg-white shadow-sm' : 'truncate'}`} title="Double click to expand">{row.ref_title}</td>}
                                                     {visibleColumns.tra_qty && <td style={{ width: colWidthsRef.current.tra_qty, minWidth: colWidthsRef.current.tra_qty }} className="px-4 py-3 text-center font-semibold text-[#5A5DF6]">{row.tra_qty}</td>}
                                                     {visibleColumns.quantity && <td style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center">{row.quantity}</td>}
                                                     {visibleColumns.available_qty && <td style={{ width: colWidthsRef.current.available_qty, minWidth: colWidthsRef.current.available_qty }} className="px-4 py-3 text-center font-bold text-[#1C2340] bg-[#F4F5F7]/50">{row.available_qty}</td>}
                                                     {visibleColumns.fc_id && <td style={{ width: colWidthsRef.current.fc_id, minWidth: colWidthsRef.current.fc_id }} className="px-4 py-3 text-center"><span className="bg-[#D9DDE5]/40 px-2 py-0.5 rounded-[3px] text-[10px]">{row.fulfilment_id}</span></td>}
                                                     {visibleColumns.sale_total && <td style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center">{row.sale_total}</td>}
                                                     {visibleColumns.sale_wh && <td style={{ width: colWidthsRef.current.sale_wh, minWidth: colWidthsRef.current.sale_wh }} className="px-4 py-3 text-center">{row.sale_wh}</td>}
-
-                                                    {visibleColumns.ship_wh && <td style={{ width: colWidthsRef.current.ship_wh, minWidth: colWidthsRef.current.ship_wh }} className="px-4 py-3 text-center flex items-center justify-center gap-1">
-                                                        {liveShipWh < 0 ? <TrendingDown size={12} className="text-[#E74C3C]" /> : <TrendingUp size={12} className="text-[#22B573]" />}
-                                                        <span className={liveShipWh < 0 ? "text-[#E74C3C] font-semibold" : ""}>{liveShipWh}</span>
-                                                    </td>}
+                                                    {visibleColumns.ship_wh && <td style={{ width: colWidthsRef.current.ship_wh, minWidth: colWidthsRef.current.ship_wh }} className="px-4 py-3 text-center flex items-center justify-center gap-1">{liveShipWh < 0 ? <TrendingDown size={12} className="text-[#E74C3C]" /> : <TrendingUp size={12} className="text-[#22B573]" />}<span className={liveShipWh < 0 ? "text-[#E74C3C] font-semibold" : ""}>{liveShipWh}</span></td>}
                                                     {visibleColumns.sum_val && <td style={{ width: colWidthsRef.current.sum_val, minWidth: colWidthsRef.current.sum_val }} className="px-4 py-3 text-center">{row.sum_val}</td>}
-
-                                                    {/* Inline Editable Final WH */}
                                                     {visibleColumns.final_wh && <td style={{ width: colWidthsRef.current.final_wh, minWidth: colWidthsRef.current.final_wh }} className="px-4 py-3 text-center bg-orange-50/30">
-                                                        <input
-                                                            type="number"
-                                                            value={row.final_wh === "" ? "" : row.final_wh}
-                                                            onChange={(e) => {
-                                                                const val = e.target.value;
-                                                                setCalculationData(prev => prev.map(p => p.id === row.id ? { ...p, final_wh: val, is_manual_final_wh: 1 } : p));
-                                                                handleItemAutoSave(row.id, val);
-                                                            }}
-                                                            onWheel={handleWheelBlur}
-                                                            className="w-14 text-center font-bold bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none transition-colors"
-                                                            style={{ color: row.is_manual_final_wh ? '#5A5DF6' : '#1C2340' }}
-                                                        />
+                                                        <input type="number" value={row.final_wh === "" ? "" : row.final_wh} onChange={(e) => { const val = e.target.value; setCalculationData(prev => prev.map(p => p.id === row.id ? { ...p, final_wh: val, is_manual_final_wh: 1 } : p)); handleItemAutoSave(row.id, val); }} onWheel={handleWheelBlur} className="w-14 text-center font-bold bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none transition-colors" style={{ color: row.is_manual_final_wh ? '#5A5DF6' : '#1C2340' }} />
                                                     </td>}
                                                 </>
-                                            )}
-
+                                            ))}
                                         </tr>
                                     );
                                 })}
                             </tbody>
-                        </table>
-                    )}
+                        </table>)}
                 </div>
 
             </div>
@@ -964,6 +924,11 @@ const Calculation = () => {
                                             <label className="text-xs text-gray-600">Cost (₹)</label>
                                             <input type="number" step="0.01" name="cost" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" placeholder="0.00" />
                                         </div>
+
+                                        <div>
+                                            <label className="text-xs text-gray-600">Weight (kg/g)</label>
+                                            <input type="number" step="0.01" name="weight" onChange={handleInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" placeholder="e.g. 0.5" />
+                                        </div>
                                     </div>
                                     <p className="text-[10px] text-gray-400 mt-4 italic">* FC ID will automatically be set to 'BLR4'. Other quantities will be initialized to 0.</p>
                                 </div>
@@ -1025,6 +990,11 @@ const Calculation = () => {
                                             <label className="text-xs text-gray-600">Cost (₹)</label>
                                             <input type="number" step="0.01" name="cost" value={editFormData.cost || 0} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
                                         </div>
+
+                                        <div>
+                                            <label className="text-xs text-gray-600">Weight (kg/g)</label>
+                                            <input type="number" step="0.01" name="weight" value={editFormData.weight || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                        </div>
                                     </div>
                                 </div>
                             </form>
@@ -1054,7 +1024,10 @@ const Calculation = () => {
 
                         <div className="p-5 overflow-y-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 bg-white">
                             <div>
-                                <h4 className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider mb-3 pb-1 border-b border-[#D9DDE5]/50">Product</h4>
+                                <label className="flex items-center gap-2 mb-3 pb-1 border-b border-[#D9DDE5]/50 cursor-pointer group">
+                                    <input type="checkbox" checked={productSpan === colGroupsConfig.product.length} onChange={(e) => handleGroupToggle('product', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                    <span className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider group-hover:text-[#5A5DF6] transition-colors">Product</span>
+                                </label>
                                 <div className="space-y-2.5">
                                     {[['group_name', 'Group Name'], ['sku', 'SKU'], ['title', 'Title'], ['category', 'Category']].map(([k, l]) => (
                                         <label key={k} className="flex items-center gap-2 cursor-pointer group">
@@ -1065,7 +1038,10 @@ const Calculation = () => {
                                 </div>
                             </div>
                             <div>
-                                <h4 className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider mb-3 pb-1 border-b border-[#D9DDE5]/50">Initial WH</h4>
+                                <label className="flex items-center gap-2 mb-3 pb-1 border-b border-[#D9DDE5]/50 cursor-pointer group">
+                                    <input type="checkbox" checked={initWHSpan === colGroupsConfig.initialWH.length} onChange={(e) => handleGroupToggle('initialWH', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                    <span className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider group-hover:text-[#5A5DF6] transition-colors">Initial WH</span>
+                                </label>
                                 <div className="space-y-2.5">
                                     {[['int_wh', 'Int - WH'], ['dec_wh', 'Dec - WH'], ['non_apron_qty', 'Non Apron Qty']].map(([k, l]) => (
                                         <label key={k} className="flex items-center gap-2 cursor-pointer group">
@@ -1076,7 +1052,10 @@ const Calculation = () => {
                                 </div>
                             </div>
                             <div>
-                                <h4 className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider mb-3 pb-1 border-b border-[#D9DDE5]/50">Variants</h4>
+                                <label className="flex items-center gap-2 mb-3 pb-1 border-b border-[#D9DDE5]/50 cursor-pointer group">
+                                    <input type="checkbox" checked={variantsSpan === colGroupsConfig.variants.length} onChange={(e) => handleGroupToggle('variants', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                    <span className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider group-hover:text-[#5A5DF6] transition-colors">Variants</span>
+                                </label>
                                 <div className="space-y-2.5">
                                     {[['sky_blue', 'Sky Blue'], ['dark_blue', 'Dark Blue'], ['brown', 'Brown'], ['green', 'Green'], ['tan', 'Tan'], ['black', 'Black'], ['red', 'Red'], ['grey', 'Grey']].map(([k, l]) => (
                                         <label key={k} className="flex items-center gap-2 cursor-pointer group">
@@ -1087,7 +1066,10 @@ const Calculation = () => {
                                 </div>
                             </div>
                             <div>
-                                <h4 className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider mb-3 pb-1 border-b border-[#D9DDE5]/50">Specs & Fin</h4>
+                                <label className="flex items-center gap-2 mb-3 pb-1 border-b border-[#D9DDE5]/50 cursor-pointer group">
+                                    <input type="checkbox" checked={specsSpan === colGroupsConfig.specs.length} onChange={(e) => handleGroupToggle('specs', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                    <span className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider group-hover:text-[#5A5DF6] transition-colors">Specs & Fin</span>
+                                </label>
                                 <div className="space-y-2.5">
                                     {[['weight', 'Weight'], ['total_weight', 'Total Weight'], ['hsn', 'HSN'], ['gst', 'GST'], ['cost', 'Cost']].map(([k, l]) => (
                                         <label key={k} className="flex items-center gap-2 cursor-pointer group">
@@ -1098,7 +1080,10 @@ const Calculation = () => {
                                 </div>
                             </div>
                             <div>
-                                <h4 className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider mb-3 pb-1 border-b border-[#D9DDE5]/50">Logistics</h4>
+                                <label className="flex items-center gap-2 mb-3 pb-1 border-b border-[#D9DDE5]/50 cursor-pointer group">
+                                    <input type="checkbox" checked={logisticsSpan === colGroupsConfig.logistics.length} onChange={(e) => handleGroupToggle('logistics', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                    <span className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider group-hover:text-[#5A5DF6] transition-colors">Logistics</span>
+                                </label>
                                 <div className="space-y-2.5">
                                     {[['ref_sku', 'SKU (Ref)'], ['ref_title', 'Title (Ref)'], ['tra_qty', 'Tra. Qty'], ['quantity', 'Quantity'], ['available_qty', 'Available Qty'], ['fc_id', 'FC ID'], ['sale_total', 'Sale-Total'], ['sale_wh', 'Sale-WH'], ['ship_wh', 'Ship-WH'], ['sum_val', 'Sum'], ['final_wh', 'Final-WH']].map(([k, l]) => (
                                         <label key={k} className="flex items-center gap-2 cursor-pointer group">
