@@ -4,6 +4,7 @@ import UploadRoute from './upload/UploadRoute'
 import CalculationRoute from './calculation/CalculationRoute'
 import ManifestRoute from './manifest/ManifestRoute'
 import StockRoute from './stock/StockRoute'
+import BoxesRoute from './boxes/BoxesRoute'
 
 const MainRoute = () => {
     return (
@@ -13,6 +14,7 @@ const MainRoute = () => {
             <CalculationRoute />
             <ManifestRoute />
             <StockRoute />
+            <BoxesRoute />
         </>
     )
 }

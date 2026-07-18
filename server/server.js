@@ -5,6 +5,9 @@ require("dotenv").config();
 
 const uploadRoutes = require("./routes/upload/upload");
 const calculationRoutes = require("./routes/calculation/calculation");
+const stockRoutes = require("./routes/stock/stock");
+const manifestRoutes = require("./routes/manifest/manifest");
+
 
 const app = express();
 
@@ -17,6 +20,9 @@ app.use(compression()); // Ye API response ko chota aur superfast bana dega
 
 app.use("/api", uploadRoutes);
 app.use("/api", calculationRoutes);
+app.use("/api", stockRoutes);  
+app.use("/api", manifestRoutes);
+
 
 
 app.get("/", (req, res) => {

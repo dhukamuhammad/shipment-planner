@@ -5,6 +5,7 @@ const ExcelJS = require("exceljs"); // 🚀 Sabse fast aur reliable package
 const db = require("../../config/db");
 const { successResponse, errorResponse } = require("../../utils/responseFormatter");
 
+
 const afsHeaders = [
     "Amazon Order Id", "Merchant Order Id", "Shipment ID", "Shipment Item Id",
     "Amazon Order Item Id", "Merchant Order Item Id", "Purchase Date",
@@ -560,7 +561,7 @@ const getRecentUploads = async (req, res) => {
             `SELECT id, file_name, report_type, file_size, status, uploaded_at 
              FROM uploaded_reports 
              ORDER BY uploaded_at DESC 
-             LIMIT 5`
+             `
         );
         connection.release();
 
@@ -844,6 +845,19 @@ const uploadTransitShipmentReport = async (req, res) => {
     }
 };
 
+// Backend controller me
+const getAllReports = async (req, res) => {
+    try {
+        // Bina kisi LIMIT ke saara data layenge
+        const [rows] = await db.query(`SELECT * FROM uploaded_reports ORDER BY uploaded_at DESC`);
+        res.json({ data: rows });
+    } catch (error) {
+        res.status(500).json({ message: "Error fetching all reports" });
+    }
+};
+
+
+
 // Module exports ko update karna mat bhoolna
 module.exports = {
     uploadAFSReport,
@@ -851,5 +865,6 @@ module.exports = {
     uploadDIHReport,
     getRecentUploads,
     deleteReport,
-    uploadTransitShipmentReport
+    uploadTransitShipmentReport,
+    getAllReports
 };

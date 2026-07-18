@@ -1,108 +1,83 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, Package, ChevronDown, FileSpreadsheet, FileText, FileType } from 'lucide-react';
+import { ArrowLeft, Package, FileSpreadsheet, Upload, Loader2 } from 'lucide-react';
+import api from '../../services/api'; // Ensure API is imported for backend calls
 
 const Manifest = () => {
     const location = useLocation();
     const navigate = useNavigate();
     const manifestData = location.state?.manifestSkus || [];
 
-    const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
-    const exportMenuRef = useRef(null);
+    // 🔥 NAYE STATES: Template Upload ke liye
+    const [hasTemplate, setHasTemplate] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
+    const templateInputRef = useRef(null);
 
-    // Bahar click karne pe export menu band karo
+    // Page load hote hi check karo ki template DB me hai ya nahi
     useEffect(() => {
-        const handleClickOutside = (e) => {
-            if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) {
-                setIsExportMenuOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
+        checkTemplateStatus();
     }, []);
+
+    const checkTemplateStatus = async () => {
+        try {
+            const res = await api.get('/check-manifest-template');
+            if (res.data && res.data.exists) {
+                setHasTemplate(true);
+            } else {
+                setHasTemplate(false);
+            }
+        } catch (error) {
+            console.error("Failed to check template status", error);
+        }
+    };
+
+    const handleTemplateUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("fileType", "Manifest_Template"); // Backend ko batane ke liye ki ye normal upload nahi, template hai
+
+        setIsUploading(true);
+        try {
+            await api.post('/upload-template', formData, {
+                headers: { "Content-Type": "multipart/form-data" }
+            });
+            alert("Template uploaded successfully!");
+            setHasTemplate(true); // Upload hote hi button disable ho jayega
+        } catch (error) {
+            alert("Failed to upload template. " + (error.response?.data?.message || ""));
+        } finally {
+            setIsUploading(false);
+            if (templateInputRef.current) templateInputRef.current.value = ""; // Input ko clear karo
+        }
+    };
 
     // Total Quantity (sirf UI me dikhega, download me include nahi hoga)
     const totalQuantity = manifestData.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
 
-    // Export ke liye common headers/rows (Total Quantity yahan include nahi hai)
-    const exportHeaders = ["Merchant SKU", "Quantity", "FC", "Prep owner", "Labeling owner", "Prep category", "HSN/SAC code", "GST rate", "Declared value(per unit)"];
-    const getExportRows = () => manifestData.map(item => [
-        item.sku, item.quantity, item.fc,
-        item.prep_owner, item.labeling_owner, item.prep_category,
-        item.hsn_sac_code, item.gst_rate, item.declared_value_per_unit
-    ]);
-
-    // --- CSV EXPORT ---
-    const handleExportCSV = () => {
-        const rows = getExportRows();
-        let csvContent = exportHeaders.join(",") + "\n";
-        rows.forEach(row => {
-            csvContent += row.map(val => `"${val ?? ''}"`).join(",") + "\n";
-        });
-
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.setAttribute('href', url);
-        link.setAttribute('download', `Manifest_${new Date().toISOString().slice(0, 10)}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setIsExportMenuOpen(false);
-    };
-
-    // --- EXCEL EXPORT (xlsx library) ---
+    // --- TEMPLATE BASED EXCEL EXPORT (Backend API) ---
     const handleExportExcel = async () => {
-        const XLSX = await import('xlsx');
-        const rows = getExportRows();
-        const wsData = [exportHeaders, ...rows];
-        const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-        // NAYA FIX: Column widths ko content ke hisab se automatically calculate karo
-        const colWidths = exportHeaders.map((header, colIndex) => {
-            let maxLength = header.length; // Pehle header ki length le lo
-
-            // Har row me is column ki value check karo ki kitni lambi hai
-            rows.forEach((row) => {
-                const val = row[colIndex];
-                const valLength = val !== null && val !== undefined ? String(val).length : 0;
-                if (valLength > maxLength) {
-                    maxLength = valLength;
-                }
+        try {
+            // Frontend se data backend bhej rahe hain file me bharne ke liye
+            const response = await api.post('/download-manifest', { manifestData }, {
+                responseType: 'blob' // Blob isliye kyunki binary file wapas aayegi
             });
 
-            // Max width 50 chars tak rakhte hain, aur thodi padding (+2) de dete hain
-            return { wch: Math.min(maxLength + 2, 50) };
-        });
-
-        ws['!cols'] = colWidths;
-
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Manifest");
-        XLSX.writeFile(wb, `Manifest_${new Date().toISOString().slice(0, 10)}.xlsx`);
-        setIsExportMenuOpen(false);
-    };
-
-    // --- PDF EXPORT (jspdf + jspdf-autotable) ---
-    const handleExportPDF = async () => {
-        const { jsPDF } = await import('jspdf');
-        const autoTableModule = await import('jspdf-autotable');
-        const autoTable = autoTableModule.default;
-
-        const doc = new jsPDF();
-        doc.setFontSize(14);
-        doc.text("Shipment Manifest", 14, 15);
-
-        autoTable(doc, {
-            head: [exportHeaders],
-            body: getExportRows(),
-            startY: 20,
-            styles: { fontSize: 7 },
-            headStyles: { fillColor: [90, 93, 246] }
-        });
-
-        doc.save(`Manifest_${new Date().toISOString().slice(0, 10)}.pdf`);
-        setIsExportMenuOpen(false);
+            // Blob ko file banakar browser me download trigger karna
+            const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `Manifest_With_Template_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (error) {
+            console.error("Export error", error);
+            alert("Failed to export! Make sure you have uploaded the Manifest Template first.");
+        }
     };
 
     return (
@@ -123,6 +98,27 @@ const Manifest = () => {
                 </div>
 
                 <div className="flex items-center gap-3">
+                    {/* 🔥 HIDDEN FILE INPUT & UPLOAD BUTTON */}
+                    <input
+                        type="file"
+                        accept=".xlsx, .xls, .csv"
+                        className="hidden"
+                        ref={templateInputRef}
+                        onChange={handleTemplateUpload}
+                    />
+                    <button
+                        onClick={() => templateInputRef.current.click()}
+                        disabled={hasTemplate || isUploading}
+                        title={hasTemplate ? "Template already uploaded. Delete it from Uploads page to add a new one." : "Upload Manifest Template"}
+                        className={`flex items-center gap-2 px-4 py-2 border border-[#D9DDE5] rounded-[5px] text-xs font-semibold shadow-sm transition-all ${hasTemplate || isUploading
+                            ? 'opacity-50 cursor-not-allowed bg-gray-50 text-gray-400'
+                            : 'bg-white text-[#1C2340] hover:bg-[#F4F5F7]'
+                            }`}
+                    >
+                        {isUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} className={hasTemplate ? "text-gray-400" : "text-[#5A5DF6]"} />}
+                        {hasTemplate ? "Template Uploaded" : "Upload Template"}
+                    </button>
+
                     {/* Total Quantity Badge — sirf display, export me include nahi */}
                     <div className="flex items-center gap-2 bg-[#5A5DF6]/10 px-3 py-2 rounded-[5px]">
                         <Package size={14} className="text-[#5A5DF6]" />
@@ -130,30 +126,14 @@ const Manifest = () => {
                         <span className="text-sm font-bold text-[#1C2340]">{totalQuantity.toLocaleString()}</span>
                     </div>
 
-                    {/* Export Dropdown */}
-                    <div className="relative" ref={exportMenuRef}>
-                        <button
-                            onClick={() => setIsExportMenuOpen(prev => !prev)}
-                            disabled={manifestData.length === 0}
-                            className="flex items-center gap-2 px-4 py-2 bg-[#5A5DF6] hover:bg-[#494ce0] text-white rounded-[5px] text-xs font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            <Download size={14} /> Export <ChevronDown size={14} />
-                        </button>
-
-                        {isExportMenuOpen && (
-                            <div className="absolute right-0 mt-2 w-44 bg-white border border-[#D9DDE5] rounded-[5px] shadow-lg z-999 overflow-hidden">
-                                <button onClick={handleExportCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-[#1C2340] hover:bg-[#F4F5F7] transition-colors">
-                                    <FileText size={14} className="text-[#5A5DF6]" /> Export as CSV
-                                </button>
-                                <button onClick={handleExportExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-[#1C2340] hover:bg-[#F4F5F7] transition-colors">
-                                    <FileSpreadsheet size={14} className="text-[#22B573]" /> Export as Excel
-                                </button>
-                                <button onClick={handleExportPDF} className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-[#1C2340] hover:bg-[#F4F5F7] transition-colors">
-                                    <FileType size={14} className="text-[#E74C3C]" /> Export as PDF
-                                </button>
-                            </div>
-                        )}
-                    </div>
+                    {/* Export as Excel Button */}
+                    <button
+                        onClick={handleExportExcel}
+                        disabled={manifestData.length === 0}
+                        className="flex items-center gap-2 px-4 py-2 bg-[#22B573] hover:bg-[#1e9d64] text-white rounded-[5px] text-xs font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                        <FileSpreadsheet size={14} /> Export as Excel
+                    </button>
                 </div>
             </div>
 

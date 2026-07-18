@@ -9,6 +9,7 @@ import {
     Hexagon,
     Upload,
     CalculatorIcon,
+    Box,
 } from 'lucide-react';
 
 const navItems = [
@@ -16,6 +17,7 @@ const navItems = [
     { name: 'Upload', icon: Upload, path: '/upload' },
     { name: 'Calculation', icon: CalculatorIcon, path: '/calculation' },
     { name: 'Stock', icon: Hexagon, path: '/stock' },
+    { name: 'Boxes', icon: Box, path: '/boxes' },
     { name: 'Reports', icon: FileText, path: '/reports' },
 ];
 

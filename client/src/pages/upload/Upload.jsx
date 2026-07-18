@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, FileText, CheckCircle2, Clock, AlertCircle, Trash2, FileSpreadsheet } from 'lucide-react';
+import { UploadCloud, FileText, CheckCircle2, Clock, AlertCircle, Trash2, FileSpreadsheet, Lock } from 'lucide-react';
 import api from '../../services/api';
 
 const Upload = () => {
@@ -10,6 +10,27 @@ const Upload = () => {
     // Naya state DB data ke liye
     const [recentReports, setRecentReports] = useState([]);
     const fileInputRef = useRef(null);
+
+    const [isViewAllOpen, setIsViewAllOpen] = useState(false);
+    const [allReportsHistory, setAllReportsHistory] = useState([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+    // Jab View All pe click hoga, tabhi saara data mangwayenge
+    const fetchAllHistory = async () => {
+        setIsLoadingHistory(true);
+        setIsViewAllOpen(true);
+        try {
+            const response = await api.get("/all-reports");
+            if (response.data && response.data.data) {
+                setAllReportsHistory(response.data.data);
+            }
+        } catch (error) {
+            console.error("Error fetching history:", error);
+        } finally {
+            setIsLoadingHistory(false);
+        }
+    };
+
 
     // API call function
     const fetchRecentUploads = async () => {
@@ -103,6 +124,47 @@ const Upload = () => {
         }
     };
 
+    // 👇🔥 PASSWORD PROTECTED DELETE FUNCTION 🔥👇
+    const handleProtectedDelete = async (id, reportType) => {
+        // 1. User se password mangna
+        const enteredPassword = window.prompt(
+            `⚠️ RESTRICTED ACTION: Protected File (${reportType})\n\n` +
+            `Is file ko delete karne ke liye Admin Password enter karein:`
+        );
+
+        // Agar user cancel par click kare ya khali submit kare
+        if (enteredPassword === null || enteredPassword.trim() === "") {
+            return;
+        }
+
+        // 2. 🔐 YAHAN APNA SECRET PASSWORD SET KAREIN 🔐
+        const ADMIN_PASSWORD = "admin"; // <--- "admin" ki jagah apna koi bhi password rakh lein
+
+        // 3. Password Check
+        if (enteredPassword !== ADMIN_PASSWORD) {
+            alert("❌ Incorrect Password! Aap is file ko delete nahi kar sakte.");
+            return; // Galat password pe yahi se wapas bhej dega
+        }
+
+        // 4. Password sahi hone par final confirmation
+        const confirmDelete = window.confirm("✅ Password Verified! Kya aap sach me ise permanently delete karna chahte hain?");
+        if (!confirmDelete) return;
+
+        try {
+            const response = await api.delete(`/${id}`);
+            if (response.status === 200) {
+                setRecentReports((prevReports) => prevReports.filter(report => report.id !== id));
+                alert("Protected report successfully deleted!");
+            }
+        } catch (error) {
+            console.error("Error deleting protected report:", error);
+            alert("Failed to delete protected report. Please try again.");
+        }
+    };
+    // 👆🔥 FUNCTION YAHAN KHATAM HOTA HAI 🔥👆
+
+
+
     return (
         <div className="space-y-6">
             {/* Page heading */}
@@ -129,8 +191,8 @@ const Upload = () => {
                                     style={{
                                         width: 'calc(25% - 2px)',
                                         transform: `translateX(${reportType === 'AFS Report' ? '0%' :
-                                                reportType === 'Business Report' ? '100%' :
-                                                    reportType === 'DIH Report' ? '200%' : '300%'
+                                            reportType === 'Business Report' ? '100%' :
+                                                reportType === 'DIH Report' ? '200%' : '300%'
                                             })`
                                     }}
                                 />
@@ -202,63 +264,209 @@ const Upload = () => {
                 <div className="bg-white border border-[#D9DDE5] rounded-[5px] p-6 h-[450px] flex flex-col">
                     <div className="flex items-center justify-between mb-4 shrink-0">
                         <h2 className="text-sm font-bold text-[#1C2340]">Recent Uploads</h2>
-                        <button className="text-xs font-semibold text-[#5A5DF6] hover:underline">
+                        <button
+                            onClick={fetchAllHistory}
+                            className="text-xs font-semibold text-[#5A5DF6] hover:underline"
+                        >
                             View All
                         </button>
                     </div>
 
                     {/* Scrollable Container with Fixed Height */}
-                    <div className="space-y-4 flex-1 overflow-y-auto pr-1 style-scrollbar">
-                        {recentReports.map((report) => {
-                            const { icon: StatusIcon, color } = getStatusStyle(report.status);
-                            const uploadDate = new Date(report.uploaded_at).toLocaleString('en-IN', {
-                                day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
-                            });
-
-                            return (
-                                <div key={report.id} className="flex items-start justify-between group p-3 hover:bg-[#F4F5F7] rounded-[5px] transition-colors border border-transparent hover:border-[#D9DDE5]/30">
-                                    <div className="flex gap-3 min-w-0">
-                                        <div
-                                            className="w-9 h-9 rounded-[4px] flex items-center justify-center shrink-0 border border-white mt-0.5"
-                                            style={{ backgroundColor: `${color}1A` }}
-                                        >
-                                            <FileSpreadsheet size={16} style={{ color }} />
-                                        </div>
-                                        <div className="min-w-0">
-                                            <p className="text-xs font-semibold text-[#1C2340] truncate max-w-[120px] sm:max-w-[160px]" title={report.file_name}>
-                                                {report.file_name}
-                                            </p>
-                                            <div className="flex items-center gap-2 mt-0.5">
-                                                <span className="text-[9px] font-semibold text-[#1C2340]/60 bg-[#D9DDE5]/40 px-1 py-0.2 rounded-[2px]">
-                                                    {report.report_type}
-                                                </span>
-                                                <span className="text-[10px] text-[#1C2340]/40">
-                                                    {report.file_size}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center gap-1 mt-1">
-                                                <StatusIcon size={10} style={{ color }} />
-                                                <span className="text-[10px] font-medium" style={{ color }}>
-                                                    {report.status} • <span className="text-[#1C2340]/40">{uploadDate}</span>
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <button
-                                        onClick={() => handleDelete(report.id)}
-                                        className="p-1.5 text-[#1C2340]/30 hover:text-[#E74C3C] hover:bg-[#E74C3C]/10 rounded-[4px] transition-colors shrink-0"
-                                        title="Delete Report"
-                                    >
-                                        <Trash2 size={14} />
-                                    </button>
-                                </div>
-                            );
-                        })}
-
-                        {recentReports.length === 0 && (
+                    <div className="flex-1 overflow-y-auto pr-1 style-scrollbar space-y-6">
+                        {recentReports.length === 0 ? (
                             <p className="text-xs text-center text-[#1C2340]/50 py-10">
                                 No recent uploads found.
                             </p>
+                        ) : (
+                            <>
+                                {/* 🔥 1. STANDARD REPORTS SECTION (Upar aa gaya) */}
+                                {recentReports.filter(r => !['Calculation', 'Manifest_Template'].includes(r.report_type)).length > 0 && (
+                                    <div className="space-y-3">
+                                        <h3 className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider border-b border-[#D9DDE5]/50 pb-1">
+                                            Standard Reports
+                                        </h3>
+                                        {recentReports
+                                            .filter(report => !['Calculation', 'Manifest_Template'].includes(report.report_type))
+                                            .map((report) => {
+                                                const { icon: StatusIcon, color } = getStatusStyle(report.status);
+                                                const uploadDate = new Date(report.uploaded_at).toLocaleString('en-IN', {
+                                                    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+                                                });
+
+                                                return (
+                                                    <div key={report.id} className="flex items-start justify-between group p-3 hover:bg-[#F4F5F7] rounded-[5px] transition-colors border border-transparent hover:border-[#D9DDE5]/30">
+                                                        <div className="flex gap-3 min-w-0 w-full pr-2">
+                                                            <div className="w-9 h-9 rounded-[4px] flex items-center justify-center shrink-0 border border-white mt-0.5" style={{ backgroundColor: `${color}1A` }}>
+                                                                <FileSpreadsheet size={16} style={{ color }} />
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <p className="text-xs font-semibold text-[#1C2340] break-words whitespace-normal leading-tight" title={report.file_name}>
+                                                                    {report.file_name}
+                                                                </p>
+                                                                <div className="flex items-center gap-2 mt-1.5">
+                                                                    <span className="text-[9px] font-semibold text-[#1C2340]/60 bg-[#D9DDE5]/40 px-1.5 py-0.5 rounded-[3px]">
+                                                                        {report.report_type}
+                                                                    </span>
+                                                                    <span className="text-[10px] text-[#1C2340]/40">{report.file_size}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1 mt-1.5">
+                                                                    <StatusIcon size={10} style={{ color }} />
+                                                                    <span className="text-[10px] font-medium" style={{ color }}>
+                                                                        {report.status} • <span className="text-[#1C2340]/40">{uploadDate}</span>
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => handleDelete(report.id)}
+                                                            className="p-1.5 text-[#1C2340]/30 hover:text-[#E74C3C] hover:bg-[#E74C3C]/10 rounded-[4px] transition-colors shrink-0"
+                                                            title="Delete Report"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
+                                    </div>
+                                )}
+
+                                {/* 🔥 2. PROTECTED CORE FILES SECTION (Neeche aa gaya) */}
+                                {recentReports.filter(r => ['Calculation', 'Manifest_Template'].includes(r.report_type)).length > 0 && (
+                                    <div className="space-y-3 mt-4">
+                                        <h3 className="text-[10px] font-bold text-[#E74C3C] uppercase tracking-wider flex items-center gap-1.5 border-b border-[#D9DDE5]/50 pb-1">
+                                            <Lock size={10} /> Core Files (Cannot Delete)
+                                        </h3>
+                                        {recentReports
+                                            .filter(report => ['Calculation', 'Manifest_Template'].includes(report.report_type))
+                                            .map((report) => {
+                                                const { icon: StatusIcon, color } = getStatusStyle(report.status);
+                                                const uploadDate = new Date(report.uploaded_at).toLocaleString('en-IN', {
+                                                    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+                                                });
+
+                                                return (
+                                                    <div key={report.id} className="flex items-start justify-between group p-3 bg-[#F4F5F7]/60 rounded-[5px] border border-[#D9DDE5]/50">
+                                                        <div className="flex gap-3 min-w-0 w-full pr-2">
+                                                            <div className="w-9 h-9 rounded-[4px] flex items-center justify-center shrink-0 border border-white mt-0.5" style={{ backgroundColor: `${color}1A` }}>
+                                                                <FileSpreadsheet size={16} style={{ color }} />
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <p className="text-xs font-semibold text-[#1C2340] break-words whitespace-normal leading-tight" title={report.file_name}>
+                                                                    {report.file_name}
+                                                                </p>
+                                                                <div className="flex items-center gap-2 mt-1.5">
+                                                                    <span className="text-[9px] font-bold text-[#E74C3C] bg-[#E74C3C]/10 px-1.5 py-0.5 rounded-[3px]">
+                                                                        {report.report_type}
+                                                                    </span>
+                                                                    <span className="text-[10px] text-[#1C2340]/40">{report.file_size}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1 mt-1.5">
+                                                                    <StatusIcon size={10} style={{ color }} />
+                                                                    <span className="text-[10px] font-medium" style={{ color }}>
+                                                                        {report.status} • <span className="text-[#1C2340]/40">{uploadDate}</span>
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        {/* Safety Locked Delete Button with Password */}
+                                                        <button
+                                                            onClick={() => handleProtectedDelete(report.id, report.report_type)}
+                                                            className="p-1.5 text-[#1C2340]/40 hover:text-[#E74C3C] hover:bg-[#E74C3C]/10 rounded-[4px] transition-colors shrink-0"
+                                                            title="Unlock & Delete Protected File"
+                                                        >
+                                                            <Lock size={14} className="group-hover:hidden" />
+                                                            <Trash2 size={14} className="hidden group-hover:block text-[#E74C3C]" />
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
+                                    </div>
+                                )}
+
+                                {/* 🔥 VIEW ALL REPORTS MODAL 🔥 */}
+                                {isViewAllOpen && (
+                                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1C2340]/60 backdrop-blur-sm p-4">
+                                        <div className="bg-white rounded-[8px] shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
+                                            {/* Modal Header */}
+                                            <div className="px-6 py-4 border-b border-[#D9DDE5] flex justify-between items-center bg-[#F9FAFB] rounded-t-[8px]">
+                                                <div>
+                                                    <h3 className="font-bold text-[#1C2340] text-lg">All Uploaded Reports</h3>
+                                                    <p className="text-xs text-[#1C2340]/50">Complete history of your uploaded files</p>
+                                                </div>
+                                                <button onClick={() => setIsViewAllOpen(false)} className="text-[#1C2340]/40 hover:text-[#E74C3C] transition-colors p-1 bg-white rounded-md shadow-sm border border-[#D9DDE5]">
+                                                    {/* Agar close icon nahi chal raha to lucide-react se 'X' import kar lena */}
+                                                    ✕
+                                                </button>
+                                            </div>
+
+                                            {/* Modal Body (Scrollable Table) */}
+                                            <div className="flex-1 overflow-y-auto p-6 bg-white style-scrollbar">
+                                                {isLoadingHistory ? (
+                                                    <div className="flex justify-center items-center h-40 text-[#5A5DF6] font-semibold text-sm">
+                                                        Loading history...
+                                                    </div>
+                                                ) : (
+                                                    <table className="w-full text-left border-collapse">
+                                                        <thead className="bg-[#F4F5F7] sticky top-0 z-10 shadow-sm">
+                                                            <tr>
+                                                                <th className="px-4 py-3 text-xs font-bold text-[#1C2340]/70 uppercase">File Name</th>
+                                                                <th className="px-4 py-3 text-xs font-bold text-[#1C2340]/70 uppercase">Report Type</th>
+                                                                <th className="px-4 py-3 text-xs font-bold text-[#1C2340]/70 uppercase">Size</th>
+                                                                <th className="px-4 py-3 text-xs font-bold text-[#1C2340]/70 uppercase">Date & Time</th>
+                                                                <th className="px-4 py-3 text-xs font-bold text-[#1C2340]/70 uppercase text-center">Action</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-[#D9DDE5]">
+                                                            {allReportsHistory.map((report) => {
+                                                                const { icon: StatusIcon, color } = getStatusStyle(report.status);
+                                                                const isProtected = ['Calculation', 'Manifest_Template'].includes(report.report_type);
+                                                                const uploadDate = new Date(report.uploaded_at).toLocaleString('en-IN', {
+                                                                    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                                                                });
+
+                                                                return (
+                                                                    <tr key={report.id} className={`hover:bg-[#F4F5F7]/50 transition-colors ${isProtected ? 'bg-red-50/20' : ''}`}>
+                                                                        <td className="px-4 py-3 flex items-center gap-3">
+                                                                            <FileSpreadsheet size={16} style={{ color }} />
+                                                                            <span className="text-sm font-semibold text-[#1C2340]">{report.file_name}</span>
+                                                                        </td>
+                                                                        <td className="px-4 py-3">
+                                                                            <span className={`text-[10px] font-bold px-2 py-1 rounded-[3px] ${isProtected ? 'bg-[#E74C3C]/10 text-[#E74C3C]' : 'bg-[#D9DDE5]/40 text-[#1C2340]/60'}`}>
+                                                                                {report.report_type}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td className="px-4 py-3 text-xs text-[#1C2340]/60">{report.file_size}</td>
+                                                                        <td className="px-4 py-3 text-xs text-[#1C2340]/60">{uploadDate}</td>
+                                                                        <td className="px-4 py-3 text-center">
+                                                                            {isProtected ? (
+                                                                                <button onClick={() => {
+                                                                                    handleProtectedDelete(report.id, report.report_type);
+                                                                                    setIsViewAllOpen(false); // Delete ke baad modal band karein (optional)
+                                                                                }} className="p-1.5 text-[#1C2340]/40 hover:text-[#E74C3C] hover:bg-[#E74C3C]/10 rounded-[4px]" title="Unlock & Delete">
+                                                                                    <Lock size={14} />
+                                                                                </button>
+                                                                            ) : (
+                                                                                <button onClick={() => {
+                                                                                    handleDelete(report.id);
+                                                                                    setIsViewAllOpen(false);
+                                                                                }} className="p-1.5 text-[#1C2340]/40 hover:text-[#E74C3C] hover:bg-[#E74C3C]/10 rounded-[4px]" title="Delete Report">
+                                                                                    <Trash2 size={14} />
+                                                                                </button>
+                                                                            )}
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                            </>
                         )}
                     </div>
                 </div>

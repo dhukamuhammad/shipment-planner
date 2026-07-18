@@ -175,8 +175,11 @@ const Calculation = () => {
         e.preventDefault();
         if (!selectedFile) return alert("Pehle ek file select karein!");
         setIsLoading(true);
+
         const uploadData = new FormData();
         uploadData.append("file", selectedFile);
+        uploadData.append("fileType", "Calculation"); // 🔥 NAYA ADD KIYA: Backend/Middleware ke liye
+
         try {
             const response = await api.post("/upload", uploadData, {
                 headers: { "Content-Type": "multipart/form-data" },
@@ -193,6 +196,7 @@ const Calculation = () => {
             setIsLoading(false);
         }
     };
+
 
     const handleManualSubmit = async (e) => {
         e.preventDefault();
@@ -310,7 +314,12 @@ const Calculation = () => {
     const filteredData = displayData.filter(item =>
         (item.group_name && item.group_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (item.sku && item.sku.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.title && item.title.toLowerCase().includes(searchTerm.toLowerCase()))
+        (item.title && item.title.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (item.hsn && item.hsn.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (item.gst && item.gst.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (item.cost && item.cost.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (item.weight && item.weight.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
     const closedCount = Object.values(collapsedGroups).filter(Boolean).length;
@@ -440,10 +449,6 @@ const Calculation = () => {
             return newState;
         });
     };
-
-
-
-
 
     return (
         <div className="space-y-3 relative pb-2">
