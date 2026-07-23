@@ -5,6 +5,7 @@ import CalculationRoute from './calculation/CalculationRoute'
 import ManifestRoute from './manifest/ManifestRoute'
 import StockRoute from './stock/StockRoute'
 import BoxesRoute from './boxes/BoxesRoute'
+import SettingsRoute from './settings/SettingsRoute'
 
 const MainRoute = () => {
     return (
@@ -15,6 +16,7 @@ const MainRoute = () => {
             <ManifestRoute />
             <StockRoute />
             <BoxesRoute />
+            <SettingsRoute />
         </>
     )
 }

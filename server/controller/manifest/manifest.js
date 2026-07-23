@@ -11,9 +11,15 @@ const fs = require('fs');
 const checkTemplateStatus = async (req, res) => {
     let connection;
     try {
+        const { marketplace_id } = req.query;
+        if (!marketplace_id) {
+            return res.json({ exists: false });
+        }
+
         connection = await db.getConnection();
         const [rows] = await connection.query(
-            `SELECT id FROM uploaded_reports WHERE report_type = 'Manifest_Template' LIMIT 1`
+            `SELECT id FROM uploaded_reports WHERE report_type = 'Manifest_Template' AND marketplace_id = ? LIMIT 1`,
+            [marketplace_id]
         );
 
         if (rows.length > 0) {
@@ -36,7 +42,10 @@ const uploadTemplate = async (req, res) => {
     let connection;
     try {
         const file = req.file;
+        const { marketplace_id } = req.body;
+
         if (!file) return res.status(400).json({ message: "No file uploaded" });
+        if (!marketplace_id) return res.status(400).json({ message: "Marketplace is required" });
 
         // File size calculate karna (e.g., "15.50 KB" ya "1.20 MB")
         let fileSize = (file.size / 1024).toFixed(2) + ' KB';
@@ -48,9 +57,9 @@ const uploadTemplate = async (req, res) => {
 
         // Aapki table ke mutabik columns me insert karna
         await connection.query(
-            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status) 
-             VALUES (?, 'Manifest_Template', ?, 'Success')`,
-            [file.filename, fileSize] // Yahan originalname ki jagah multer ka filename use kar rahe hain
+            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status, marketplace_id) 
+             VALUES (?, 'Manifest_Template', ?, 'Success', ?)`,
+            [file.filename, fileSize, marketplace_id] // Yahan originalname ki jagah multer ka filename use kar rahe hain
         );
 
         return res.json({ message: "Template uploaded successfully" });
@@ -68,14 +77,18 @@ const uploadTemplate = async (req, res) => {
 const downloadManifest = async (req, res) => {
     let connection;
     try {
-        const { manifestData } = req.body;
+        const { manifestData, marketplace_id } = req.body;
         if (!manifestData || manifestData.length === 0) {
             return res.status(400).json({ message: "No data to export" });
+        }
+        if (!marketplace_id) {
+            return res.status(400).json({ message: "Marketplace is required for export" });
         }
 
         connection = await db.getConnection();
         const [rows] = await connection.query(
-            `SELECT file_name FROM uploaded_reports WHERE report_type = 'Manifest_Template' ORDER BY id DESC LIMIT 1`
+            `SELECT file_name FROM uploaded_reports WHERE report_type = 'Manifest_Template' AND marketplace_id = ? ORDER BY id DESC LIMIT 1`,
+            [marketplace_id]
         );
 
         if (rows.length === 0) {

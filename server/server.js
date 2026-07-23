@@ -7,7 +7,8 @@ const uploadRoutes = require("./routes/upload/upload");
 const calculationRoutes = require("./routes/calculation/calculation");
 const stockRoutes = require("./routes/stock/stock");
 const manifestRoutes = require("./routes/manifest/manifest");
-
+const marketplaceRoutes = require("./routes/marketplace/marketplace");
+const settingsRoutes = require("./routes/settings/settings");
 
 const app = express();
 
@@ -22,6 +23,8 @@ app.use("/api", uploadRoutes);
 app.use("/api", calculationRoutes);
 app.use("/api", stockRoutes);  
 app.use("/api", manifestRoutes);
+app.use("/api", marketplaceRoutes);
+app.use("/api", settingsRoutes);
 
 
 

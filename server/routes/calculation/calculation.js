@@ -9,6 +9,7 @@ const {
     getCalculationData,
     updateMasterData,
     updateItemFinalWh,
+    updateItemSuggestWh,
     resetFinalWh,
     getManifestDetails
 } = require("../../controller/calculation/calculation");
@@ -26,8 +27,9 @@ router.post("/manual-add", addManualCalculationRow);
 router.delete("/delete-row/:id", deleteCalculationRow);
 
 router.put("/edit-row", editCalculationRow);
-router.put("/update-master", updateMasterData);
+router.put("/update-master", updateMasterData); // Master row data update karne ke liye
 router.put("/update-item-final-wh", updateItemFinalWh);
+router.put("/update-item-suggest-wh", updateItemSuggestWh);
 router.put("/reset-final-wh", resetFinalWh);
 
 

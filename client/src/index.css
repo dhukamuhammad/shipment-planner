@@ -27,8 +27,8 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar {
-  height: 6px;
-  width: 6px;
+  height: 12px;
+  width: 10px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {

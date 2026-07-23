@@ -5,24 +5,6 @@ const ExcelJS = require("exceljs"); // 🚀 Sabse fast aur reliable package
 const db = require("../../config/db");
 const { successResponse, errorResponse } = require("../../utils/responseFormatter");
 
-
-const afsHeaders = [
-    "Amazon Order Id", "Merchant Order Id", "Shipment ID", "Shipment Item Id",
-    "Amazon Order Item Id", "Merchant Order Item Id", "Purchase Date",
-    "Payments Date", "Shipment Date", "Reporting Date", "Buyer Email",
-    "Buyer Name", "Buyer Phone Number", "Merchant SKU", "Title",
-    "Shipped Quantity", "Currency", "Item Price", "Item Tax",
-    "Shipping Price", "Shipping Tax", "Gift Wrap Price", "Gift Wrap Tax",
-    "Recipient Name", "Shipping Address 1", "Shipping Address 2",
-    "Shipping Address 3", "Shipping City", "Shipping State",
-    "Shipping Postal Code", "Shipping Country Code", "Shipping Phone Number",
-    "Billing Address 1", "Billing Address 2", "Billing Address 3",
-    "Billing City", "Billing State", "bill-postal-code", "bill-country",
-    "Item Promo Discount", "Shipment Promo Discount", "Carrier",
-    "Tracking Number", "Estimated Arrival Date", "FC", "Fulfillment Channel",
-    "Sales Channel"
-];
-
 const parseCsv = (filePath) => {
     return new Promise((resolve, reject) => {
         const results = [];
@@ -32,6 +14,56 @@ const parseCsv = (filePath) => {
             .on('end', () => resolve(results))
             .on('error', (error) => reject(error));
     });
+};
+
+const afsColumnMap = {
+    amazon_order_id: "Amazon Order Id",
+    merchant_order_id: "Merchant Order Id",
+    shipment_id: "Shipment ID",
+    shipment_item_id: "Shipment Item Id",
+    amazon_order_item_id: "Amazon Order Item Id",
+    merchant_order_item_id: "Merchant Order Item Id",
+    purchase_date: "Purchase Date",
+    payments_date: "Payments Date",
+    shipment_date: "Shipment Date",
+    reporting_date: "Reporting Date",
+    buyer_email: "Buyer Email",
+    buyer_name: "Buyer Name",
+    buyer_phone_number: "Buyer Phone Number",
+    merchant_sku: "Merchant SKU",
+    title: "Title",
+    shipped_quantity: "Shipped Quantity",
+    currency: "Currency",
+    item_price: "Item Price",
+    item_tax: "Item Tax",
+    shipping_price: "Shipping Price",
+    shipping_tax: "Shipping Tax",
+    gift_wrap_price: "Gift Wrap Price",
+    gift_wrap_tax: "Gift Wrap Tax",
+    recipient_name: "Recipient Name",
+    shipping_address_1: "Shipping Address 1",
+    shipping_address_2: "Shipping Address 2",
+    shipping_address_3: "Shipping Address 3",
+    shipping_city: "Shipping City",
+    shipping_state: "Shipping State",
+    shipping_postal_code: "Shipping Postal Code",
+    shipping_country_code: "Shipping Country Code",
+    shipping_phone_number: "Shipping Phone Number",
+    billing_address_1: "Billing Address 1",
+    billing_address_2: "Billing Address 2",
+    billing_address_3: "Billing Address 3",
+    billing_city: "Billing City",
+    billing_state: "Billing State",
+    bill_postal_code: "bill-postal-code",
+    bill_country: "bill-country",
+    item_promo_discount: "Item Promo Discount",
+    shipment_promo_discount: "Shipment Promo Discount",
+    carrier: "Carrier",
+    tracking_number: "Tracking Number",
+    estimated_arrival_date: "Estimated Arrival Date",
+    fc: "FC",
+    fulfillment_channel: "Fulfillment Channel",
+    sales_channel: "Sales Channel"
 };
 
 const uploadAFSReport = async (req, res) => {
@@ -48,11 +80,12 @@ const uploadAFSReport = async (req, res) => {
 
         const fileSizeMB = (req.file.size / (1024 * 1024)).toFixed(2) + " MB";
         const fileExt = path.extname(req.file.originalname).toLowerCase();
+        const marketplace_id = req.body.marketplace_id || null;
 
         const [masterResult] = await connection.query(
-            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status)
-             VALUES (?, 'AFS', ?, 'Processing')`,
-            [req.file.filename, fileSizeMB]
+            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status, marketplace_id)
+             VALUES (?, 'AFS', ?, 'Processing', ?)`,
+            [req.file.filename, fileSizeMB, marketplace_id]
         );
         reportId = masterResult.insertId;
 
@@ -63,7 +96,7 @@ const uploadAFSReport = async (req, res) => {
         if (fileExt === '.csv') {
             rawData = await parseCsv(req.file.path);
         } else {
-            // 🚀 BUG FIX: Async Iterator se padhenge, ab kabhi hang nahi hoga aur styles ignore karega
+            // 🚀 Async Iterator se padhenge, ab kabhi hang nahi hoga aur styles ignore karega
             const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(req.file.path, {
                 styles: 'ignore',
                 sharedStrings: 'cache',
@@ -76,7 +109,6 @@ const uploadAFSReport = async (req, res) => {
 
             for await (const worksheet of workbookReader) {
                 for await (const row of worksheet) {
-                    // Agar Excel me puri row khali hai toh usko yahin chhod do
                     if (!row.hasValues) continue;
 
                     if (isFirstRow) {
@@ -90,7 +122,6 @@ const uploadAFSReport = async (req, res) => {
                             const header = sheetHeaders[colNumber];
                             if (header) {
                                 let val = cell.value;
-                                // Agar object/rich-text hai toh string me convert karo
                                 if (val && typeof val === 'object') {
                                     if (val.result !== undefined) {
                                         val = val.result;
@@ -115,21 +146,36 @@ const uploadAFSReport = async (req, res) => {
             throw new Error("Uploaded file is empty or formatted incorrectly.");
         }
 
-        // 🚨 STRICT VALIDATION: Check if it's actually an AFS Report
+        // 🚨 DYNAMIC STRICT VALIDATION: (Map se automatic dhoondhega)
         const firstRowKeys = Object.keys(rawData[0]);
-        if (!firstRowKeys.includes("Amazon Order Id") && !firstRowKeys.includes("Merchant SKU")) {
-            throw new Error("Mismatched Report! Ye AFS Report nahi hai. Please sahi file upload karein.");
+
+        // Map se current names nikal rahe hain
+        const expectedOrderIdHeader = afsColumnMap.amazon_order_id; // e.g. "Amazon Order Id"
+        const expectedSkuHeader = afsColumnMap.merchant_sku;       // e.g. "Merchant SKU"
+
+        if (!firstRowKeys.includes(expectedOrderIdHeader) && !firstRowKeys.includes(expectedSkuHeader)) {
+            throw new Error(`Mismatched Report! File me '${expectedOrderIdHeader}' ya '${expectedSkuHeader}' column nahi mila. Please sahi file upload karein.`);
         }
 
+        // ⏱️ TIMER 2: Data Preparation Time
         console.time("⏳ TIMER 2: Data Preparation Time");
         const bulkValues = [];
+
+        // Map keys nikalne ke liye
+        const dbColumns = Object.keys(afsColumnMap);
+
         rawData.forEach((row) => {
+            // Har row me pehle reportId (Foreign Key) push hogi
             const rowValues = [reportId];
             let hasData = false;
 
-            afsHeaders.forEach((header) => {
-                const cellValue = row[header] !== undefined ? row[header] : null;
+            // Database columns ke sequence ke mutabik file se value nikalenge
+            dbColumns.forEach((dbCol) => {
+                const excelHeader = afsColumnMap[dbCol]; // Smartly mapped excel header name
+                const cellValue = row[excelHeader] !== undefined ? row[excelHeader] : null;
+
                 rowValues.push(cellValue);
+
                 if (cellValue !== null && cellValue !== "") {
                     hasData = true;
                 }
@@ -141,8 +187,11 @@ const uploadAFSReport = async (req, res) => {
         });
         console.timeEnd("⏳ TIMER 2: Data Preparation Time");
 
+        // ⏱️ TIMER 3: Database Insertion Time
         console.time("⏳ TIMER 3: Database Insertion Time");
-        const insertQuery = `INSERT INTO afs_data (report_id, amazon_order_id, merchant_order_id, shipment_id, shipment_item_id, amazon_order_item_id, merchant_order_item_id, purchase_date, payments_date, shipment_date, reporting_date, buyer_email, buyer_name, buyer_phone_number, merchant_sku, title, shipped_quantity, currency, item_price, item_tax, shipping_price, shipping_tax, gift_wrap_price, gift_wrap_tax, recipient_name, shipping_address_1, shipping_address_2, shipping_address_3, shipping_city, shipping_state, shipping_postal_code, shipping_country_code, shipping_phone_number, billing_address_1, billing_address_2, billing_address_3, billing_city, billing_state, bill_postal_code, bill_country, item_promo_discount, shipment_promo_discount, carrier, tracking_number, estimated_arrival_date, fc, fulfillment_channel, sales_channel) VALUES ?`;
+
+        // Dynamic Insert Query (Map ke basis pe)
+        const insertQuery = `INSERT INTO afs_data (report_id, ${dbColumns.join(', ')}) VALUES ?`;
 
         const CHUNK_SIZE = 500;
         for (let i = 0; i < bulkValues.length; i += CHUNK_SIZE) {
@@ -150,6 +199,34 @@ const uploadAFSReport = async (req, res) => {
             await connection.query(insertQuery, [chunk]);
         }
         console.timeEnd("⏳ TIMER 3: Database Insertion Time");
+
+        // // --- 🗑️ AUTO DELETE OLD DATA LOGIC ---
+        // console.time("⏳ TIMER 4: Auto-Delete Old Data");
+        // const [cutoffResult] = await connection.query(`
+        //     -- Temporary for testing: INTERVAL 10 DAY (Change back to INTERVAL 3 MONTH for production)
+        //     SELECT DATE_SUB(MAX(DATE(shipment_date)), INTERVAL 10 DAY) as cutoff_date 
+        //     FROM afs_data 
+        //     WHERE shipment_date IS NOT NULL AND shipment_date != ''
+        // `);
+
+        const [cutoffResult] = await connection.query(`
+            SELECT DATE_SUB(MAX(DATE(shipment_date)), INTERVAL 4 MONTH) as cutoff_date 
+            FROM afs_data 
+            WHERE shipment_date IS NOT NULL AND shipment_date != ''
+        `);
+
+        let deletedOldRecords = 0;
+        if (cutoffResult.length > 0 && cutoffResult[0].cutoff_date) {
+            const cutoffDate = cutoffResult[0].cutoff_date;
+            const [deleteResult] = await connection.query(`
+                DELETE FROM afs_data 
+                WHERE shipment_date IS NOT NULL AND shipment_date != '' 
+                AND DATE(shipment_date) < ?
+            `, [cutoffDate]);
+            deletedOldRecords = deleteResult.affectedRows;
+            console.log(`🗑️ Auto-deleted ${deletedOldRecords} old records before cutoff date: ${cutoffDate}`);
+        }
+        console.timeEnd("⏳ TIMER 4: Auto-Delete Old Data");
 
         await connection.query(
             `UPDATE uploaded_reports SET status = 'Success' WHERE id = ?`,
@@ -171,7 +248,6 @@ const uploadAFSReport = async (req, res) => {
 
     } catch (error) {
         console.error("Upload Error:", error);
-
         if (connection) {
             await connection.rollback();
             if (reportId) {
@@ -182,35 +258,59 @@ const uploadAFSReport = async (req, res) => {
             }
             connection.release();
         }
-
         return errorResponse(res, error.message || "Failed to process the report", 500);
     }
 };
+const businessColumnMap = {
+    parent_asin: "(Parent) ASIN",
+    child_asin: "(Child) ASIN",
+    title: "Title",
+    sku: "SKU",
+    units_ordered: "Units Ordered",
+    units_ordered_b2b: "Units Ordered - B2B",
+    unit_session_percentage: "Unit Session Percentage",
+    unit_session_percentage_b2b: "Unit Session Percentage - B2B",
+    ordered_product_sales: "Ordered Product Sales",
+    ordered_product_sales_b2b: "Ordered Product Sales - B2B",
+    total_order_items: "Total Order Items",
+    total_order_items_b2b: "Total Order Items - B2B"
+};
 
-// Business Report ke exact headers file se map karne ke liye
-const businessHeaders = [
-    "(Parent) ASIN", "(Child) ASIN", "Title", "SKU", "Units Ordered",
-    "Units Ordered - B2B", "Unit Session Percentage", "Unit Session Percentage - B2B",
-    "Ordered Product Sales", "Ordered Product Sales - B2B", "Total Order Items",
-    "Total Order Items - B2B"
-];
-
-// Helper Function: String me se commas, currency symbols aur % hatane ke liye
+// Helper Function: String me se commas, currency symbols aur % hatane ke liye (No Changes Here)
 const sanitizeNumber = (val, isFloat = false) => {
     if (val === null || val === undefined || val === '') return 0;
-
-    // Agar pehle se number hai toh direct return karo
     if (typeof val === 'number') return val;
-
-    // Agar object hai (jaise exceljs formula object), toh uski string value nikalo
     let str = typeof val === 'object' ? (val.result !== undefined ? val.result.toString() : '') : val.toString();
-
-    // Spaces, currency symbols, commas aur % sign ko remove karo
     let cleanStr = str.replace(/[%₹,]/g, '').trim();
-
     if (cleanStr === '' || isNaN(cleanStr)) return 0;
-
     return isFloat ? parseFloat(cleanStr) : parseInt(cleanStr, 10);
+};
+
+// Helper Function: Excel serial date (jaise 46215) ko YYYY-MM-DD string mein convert karne ke liye
+const parseExcelDate = (val) => {
+    if (!val) return null;
+
+    // Agar val pehle se hi ek Date object hai
+    if (val instanceof Date) {
+        return val.toISOString().split('T')[0];
+    }
+
+    // Agar val koi object hai jisme result hai
+    if (typeof val === 'object' && val.result !== undefined) {
+        val = val.result;
+    }
+
+    // Agar numeric serial hai (jaise 46215)
+    const serial = Number(val);
+    if (!isNaN(serial) && serial > 20000 && serial < 100000) {
+        // Excel epoch starts at Jan 1, 1900. (using 25569 as offset to UNIX epoch)
+        // Note: 86400 * 1000 = 86400000 milliseconds in a day
+        const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
+        return date.toISOString().split('T')[0];
+    }
+
+    // Fallback: agar string ke form me normal date hai (e.g. "2026-07-12")
+    return val.toString().trim();
 };
 
 const uploadBusinessReport = async (req, res) => {
@@ -228,11 +328,13 @@ const uploadBusinessReport = async (req, res) => {
         const fileSizeMB = (req.file.size / (1024 * 1024)).toFixed(2) + " MB";
         const fileExt = path.extname(req.file.originalname).toLowerCase();
 
+        const marketplace_id = req.body.marketplace_id || null;
+        
         // 1. Master report table mein Business entry create karein
         const [masterResult] = await connection.query(
-            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status)
-             VALUES (?, 'Business', ?, 'Processing')`,
-            [req.file.filename, fileSizeMB]
+            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status, marketplace_id)
+             VALUES (?, 'Business', ?, 'Processing', ?)`,
+            [req.file.filename, fileSizeMB, marketplace_id]
         );
         reportId = masterResult.insertId;
 
@@ -242,7 +344,7 @@ const uploadBusinessReport = async (req, res) => {
         if (fileExt === '.csv') {
             rawData = await parseCsv(req.file.path);
         } else {
-            // Wahi super-fast stream reader jo AFS me kaam aaya
+            // Super-fast stream reader
             const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(req.file.path, {
                 styles: 'ignore',
                 sharedStrings: 'cache',
@@ -286,51 +388,61 @@ const uploadBusinessReport = async (req, res) => {
             throw new Error("Uploaded Business file is empty or formatted incorrectly.");
         }
 
-        // 🚨 STRICT VALIDATION: Check if it's actually a Business Report
+        // 🚨 DYNAMIC STRICT VALIDATION: (Map se automatic dhoondhega)
         const firstRowKeys = Object.keys(rawData[0]);
-        if (!firstRowKeys.includes("(Parent) ASIN") && !firstRowKeys.includes("Units Ordered")) {
-            throw new Error("Mismatched Report! Ye Business Report nahi hai. Please sahi file upload karein.");
+        const expectedAsinHeader = businessColumnMap.parent_asin; // e.g. "(Parent) ASIN"
+        const expectedUnitsHeader = businessColumnMap.units_ordered; // e.g. "Units Ordered"
+
+        if (!firstRowKeys.includes(expectedAsinHeader) && !firstRowKeys.includes(expectedUnitsHeader)) {
+            throw new Error(`Mismatched Report! File me '${expectedAsinHeader}' ya '${expectedUnitsHeader}' column nahi mila. Please sahi file upload karein.`);
         }
 
         console.time("⏳ TIMER 2: Business Data Preparation Time");
         const bulkValues = [];
 
+        // Map keys nikalne ke liye
+        const dbColumns = Object.keys(businessColumnMap);
+
+        // Ye arrays batayengi kis column ko Number ya Float (Decimal) banana hai
+        const floatColumns = ['unit_session_percentage', 'unit_session_percentage_b2b', 'ordered_product_sales', 'ordered_product_sales_b2b'];
+        const intColumns = ['units_ordered', 'units_ordered_b2b', 'total_order_items', 'total_order_items_b2b'];
+
         rawData.forEach((row) => {
-            // Table columns logic ke sath sequence maintain kar rahe hain
-            const parentAsin = row["(Parent) ASIN"] || null;
-            const childAsin = row["(Child) ASIN"] || null;
-            const title = row["Title"] || null;
-            const sku = row["SKU"] || null;
+            const rowValues = [reportId];
+            let hasValidSkuOrAsin = false;
 
-            // Numeric validation aur data sanitization apply kar rahe hain
-            const unitsOrdered = sanitizeNumber(row["Units Ordered"]);
-            const unitsOrderedB2b = sanitizeNumber(row["Units Ordered - B2B"]);
-            const unitSessionPercentage = sanitizeNumber(row["Unit Session Percentage"], true);
-            const unitSessionPercentageB2b = sanitizeNumber(row["Unit Session Percentage - B2B"], true);
-            const orderedProductSales = sanitizeNumber(row["Ordered Product Sales"], true);
-            const orderedProductSalesB2b = sanitizeNumber(row["Ordered Product Sales - B2B"], true);
-            const totalOrderItems = sanitizeNumber(row["Total Order Items"]);
-            const totalOrderItemsB2b = sanitizeNumber(row["Total Order Items - B2B"]);
+            // Database columns ke sequence ke mutabik file se value nikalenge
+            dbColumns.forEach((dbCol) => {
+                const excelHeader = businessColumnMap[dbCol];
+                let cellValue = row[excelHeader];
 
-            // Sirf wahi rows insert karenge jisme SKU ya ASIN ho (faltu blank rows skip)
-            if (sku || childAsin) {
-                bulkValues.push([
-                    reportId, parentAsin, childAsin, title, sku,
-                    unitsOrdered, unitsOrderedB2b, unitSessionPercentage, unitSessionPercentageB2b,
-                    orderedProductSales, orderedProductSalesB2b, totalOrderItems, totalOrderItemsB2b
-                ]);
+                // 🚀 SMART PARSING: Agar column numeric hai, to sanitizeNumber use karein
+                if (floatColumns.includes(dbCol)) {
+                    cellValue = sanitizeNumber(cellValue, true);
+                } else if (intColumns.includes(dbCol)) {
+                    cellValue = sanitizeNumber(cellValue, false);
+                } else {
+                    cellValue = cellValue !== undefined ? cellValue : null;
+                }
+
+                rowValues.push(cellValue);
+
+                // Validation: Sirf wahi rows insert karenge jisme SKU ya Child ASIN ho
+                if ((dbCol === 'sku' || dbCol === 'child_asin') && cellValue) {
+                    hasValidSkuOrAsin = true;
+                }
+            });
+
+            if (hasValidSkuOrAsin) {
+                bulkValues.push(rowValues);
             }
         });
         console.timeEnd("⏳ TIMER 2: Business Data Preparation Time");
 
         console.time("⏳ TIMER 3: Business Database Insertion Time");
-        const insertQuery = `
-            INSERT INTO business_data (
-                report_id, parent_asin, child_asin, title, sku, 
-                units_ordered, units_ordered_b2b, unit_session_percentage, unit_session_percentage_b2b, 
-                ordered_product_sales, ordered_product_sales_b2b, total_order_items, total_order_items_b2b
-            ) VALUES ?
-        `;
+
+        // 🚀 DYNAMIC INSERT QUERY (Aapke Map ke columns ke hisab se generate hogi)
+        const insertQuery = `INSERT INTO business_data (report_id, ${dbColumns.join(', ')}) VALUES ?`;
 
         const CHUNK_SIZE = 500;
         for (let i = 0; i < bulkValues.length; i += CHUNK_SIZE) {
@@ -360,7 +472,6 @@ const uploadBusinessReport = async (req, res) => {
 
     } catch (error) {
         console.error("Business Upload Error:", error);
-
         if (connection) {
             await connection.rollback();
             if (reportId) {
@@ -371,10 +482,10 @@ const uploadBusinessReport = async (req, res) => {
             }
             connection.release();
         }
-
         return errorResponse(res, error.message || "Failed to process the business report", 500);
     }
 };
+
 
 // DIH Report ke headers
 const dihHeaders = [
@@ -400,11 +511,37 @@ const uploadDIHReport = async (req, res) => {
         const fileSizeMB = (req.file.size / (1024 * 1024)).toFixed(2) + " MB";
         const fileExt = path.extname(req.file.originalname).toLowerCase();
 
+        // --- 🗑️ AUTO DELETE PREVIOUS DIH REPORT ---
+        console.time("⏳ TIMER 0: Delete Old DIH Report");
+        const [oldDihReports] = await connection.query(`SELECT id, file_name FROM uploaded_reports WHERE report_type = 'DIH'`);
+        if (oldDihReports.length > 0) {
+            const oldIds = oldDihReports.map(r => r.id);
+            
+            // Delete files from storage
+            oldDihReports.forEach((report) => {
+                const oldFilePath = path.join(__dirname, "../../client/public/upload", report.file_name);
+                if (fs.existsSync(oldFilePath)) {
+                    try {
+                        fs.unlinkSync(oldFilePath);
+                    } catch(err) {
+                        console.error("Failed to delete old DIH file:", err);
+                    }
+                }
+            });
+
+            // Delete from database (Cascade will automatically delete from dih_data)
+            await connection.query(`DELETE FROM uploaded_reports WHERE id IN (?)`, [oldIds]);
+            console.log(`🗑️ Deleted ${oldDihReports.length} old DIH reports before uploading new one.`);
+        }
+        console.timeEnd("⏳ TIMER 0: Delete Old DIH Report");
+
+        const marketplace_id = req.body.marketplace_id || null;
+
         // Master table mein DIH ki entry
         const [masterResult] = await connection.query(
-            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status)
-             VALUES (?, 'DIH', ?, 'Processing')`,
-            [req.file.filename, fileSizeMB]
+            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status, marketplace_id)
+             VALUES (?, 'DIH', ?, 'Processing', ?)`,
+            [req.file.filename, fileSizeMB, marketplace_id]
         );
         reportId = masterResult.insertId;
 
@@ -468,7 +605,7 @@ const uploadDIHReport = async (req, res) => {
 
         rawData.forEach((row) => {
             // Strings
-            const reportDate = row["Date"] || null;
+            const reportDate = parseExcelDate(row["Date"]) || null;
             const fnsku = row["FNSKU"] || null;
             const asin = row["ASIN"] || null;
             const msku = row["MSKU"] || null;
@@ -558,9 +695,10 @@ const getRecentUploads = async (req, res) => {
     try {
         const connection = await db.getConnection();
         const [rows] = await connection.query(
-            `SELECT id, file_name, report_type, file_size, status, uploaded_at 
-             FROM uploaded_reports 
-             ORDER BY uploaded_at DESC 
+            `SELECT r.id, r.file_name, r.report_type, r.file_size, r.status, r.uploaded_at, m.name as marketplace 
+             FROM uploaded_reports r
+             LEFT JOIN marketplaces m ON r.marketplace_id = m.id
+             ORDER BY r.uploaded_at DESC 
              `
         );
         connection.release();
@@ -643,11 +781,13 @@ const uploadTransitShipmentReport = async (req, res) => {
         const fileSizeMB = (req.file.size / (1024 * 1024)).toFixed(2) + " MB";
         const fileExt = path.extname(req.file.originalname).toLowerCase();
 
+        const marketplace_id = req.body.marketplace_id || null;
+
         // 1. Master table mein Transit Shipment ki entry
         const [masterResult] = await connection.query(
-            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status)
-             VALUES (?, 'Transit Shipment', ?, 'Processing')`,
-            [req.file.filename, fileSizeMB]
+            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status, marketplace_id)
+             VALUES (?, 'Transit Shipment', ?, 'Processing', ?)`,
+            [req.file.filename, fileSizeMB, marketplace_id]
         );
         reportId = masterResult.insertId;
 
@@ -821,6 +961,30 @@ const uploadTransitShipmentReport = async (req, res) => {
         }
         console.timeEnd("⏳ TIMER 3: Transit DB Insert");
 
+        // --- 🗑️ AUTO DELETE 4-MONTH OLD TRANSIT REPORTS ---
+        console.time("⏳ TIMER 4: Auto-Delete Old Transit Reports");
+        const [oldTransitReports] = await connection.query(`
+            SELECT id, file_name 
+            FROM uploaded_reports 
+            WHERE report_type = 'Transit Shipment' 
+            AND uploaded_at < DATE_SUB(NOW(), INTERVAL 4 MONTH)
+        `);
+        
+        if (oldTransitReports.length > 0) {
+            const oldIds = oldTransitReports.map(r => r.id);
+            // Delete physical files
+            oldTransitReports.forEach((report) => {
+                const oldFilePath = path.join(__dirname, "../../client/public/upload", report.file_name);
+                if (fs.existsSync(oldFilePath)) {
+                    try { fs.unlinkSync(oldFilePath); } catch(err) { console.error("Failed to delete old Transit file:", err); }
+                }
+            });
+            // Delete from database (Cascade deletes data)
+            await connection.query(`DELETE FROM uploaded_reports WHERE id IN (?)`, [oldIds]);
+            console.log(`🗑️ Deleted ${oldTransitReports.length} old Transit reports (> 4 months).`);
+        }
+        console.timeEnd("⏳ TIMER 4: Auto-Delete Old Transit Reports");
+
         await connection.query(`UPDATE uploaded_reports SET status = 'Success' WHERE id = ?`, [reportId]);
         await connection.commit();
         connection.release();
@@ -848,8 +1012,12 @@ const uploadTransitShipmentReport = async (req, res) => {
 // Backend controller me
 const getAllReports = async (req, res) => {
     try {
-        // Bina kisi LIMIT ke saara data layenge
-        const [rows] = await db.query(`SELECT * FROM uploaded_reports ORDER BY uploaded_at DESC`);
+        const [rows] = await db.query(`
+            SELECT r.*, m.name as marketplace 
+            FROM uploaded_reports r
+            LEFT JOIN marketplaces m ON r.marketplace_id = m.id
+            ORDER BY r.uploaded_at DESC
+        `);
         res.json({ data: rows });
     } catch (error) {
         res.status(500).json({ message: "Error fetching all reports" });
@@ -857,6 +1025,71 @@ const getAllReports = async (req, res) => {
 };
 
 
+// Naya function: headers peek karne ke liye
+const peekHeaders = async (filePath, fileExt) => {
+    let sheetHeaders = [];
+    if (fileExt === '.csv') {
+        const rawRows = await parseCsvRaw(filePath);
+        for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
+            const row = rawRows[i];
+            if (row && row.length > 0) {
+                sheetHeaders = sheetHeaders.concat(row.map(c => c ? c.toString().trim().toLowerCase() : ''));
+            }
+        }
+    } else {
+        const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
+            styles: 'ignore', sharedStrings: 'cache', hyperlinks: 'ignore', worksheets: 'emit'
+        });
+        for await (const worksheet of workbookReader) {
+            let rowCount = 0;
+            for await (const row of worksheet) {
+                if (!row.hasValues) continue;
+                row.eachCell({ includeEmpty: true }, (cell) => {
+                    let val = cell.value ? cell.value.toString().trim().toLowerCase() : '';
+                    if (val) sheetHeaders.push(val);
+                });
+                rowCount++;
+                if (rowCount > 10) break;
+            }
+            break;
+        }
+    }
+    return sheetHeaders;
+};
+
+const autoUploadReport = async (req, res) => {
+    try {
+        if (!req.file) {
+            return errorResponse(res, "Please upload a file", 400);
+        }
+
+        const fileExt = path.extname(req.file.originalname).toLowerCase();
+        const headers = await peekHeaders(req.file.path, fileExt);
+        const headersStr = headers.join(" ");
+
+        if (headersStr.includes("amazon order id") || headersStr.includes("merchant order id")) {
+            return await uploadAFSReport(req, res);
+        } else if (headersStr.includes("(parent) asin") || headersStr.includes("units ordered")) {
+            return await uploadBusinessReport(req, res);
+        } else if (headersStr.includes("starting warehouse balance") || headersStr.includes("fnsku")) {
+            return await uploadDIHReport(req, res);
+        } else if (headersStr.includes("default prep owner") || (headersStr.includes("merchant sku") && headersStr.includes("fc") && headersStr.includes("quantity"))) {
+            return await uploadTransitShipmentReport(req, res);
+        } else {
+            // Agar file pehchan me nahi aayi, usko server se delete kar do
+            if (fs.existsSync(req.file.path)) {
+                fs.unlinkSync(req.file.path);
+            }
+            return errorResponse(res, "Could not detect report type from file headers. Please ensure it is a valid AFS, Business, DIH, or Transit report.", 400);
+        }
+    } catch (error) {
+        console.error("Auto Upload Error:", error);
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        return errorResponse(res, "Failed to process auto upload", 500);
+    }
+};
 
 // Module exports ko update karna mat bhoolna
 module.exports = {
@@ -866,5 +1099,6 @@ module.exports = {
     getRecentUploads,
     deleteReport,
     uploadTransitShipmentReport,
-    getAllReports
+    getAllReports,
+    autoUploadReport
 };

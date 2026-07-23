@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Package, FileSpreadsheet, Upload, Loader2 } from 'lucide-react';
-import api from '../../services/api'; // Ensure API is imported for backend calls
+import { ArrowLeft, Package, FileSpreadsheet, Upload, Loader2, X, UploadCloud } from 'lucide-react';
+import api from '../../services/api';
+import MarketplaceDropdown from '../../components/MarketplaceDropdown';
 
 const Manifest = () => {
     const location = useLocation();
@@ -9,35 +10,41 @@ const Manifest = () => {
     const manifestData = location.state?.manifestSkus || [];
 
     // 🔥 NAYE STATES: Template Upload ke liye
+    const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [selectedMarketplaceId, setSelectedMarketplaceId] = useState(location.state?.marketplace_id || "");
+    // const [selectedMarketplaceId, setSelectedMarketplaceId] = useState(location.state?.marketplace_id || "");
     const [hasTemplate, setHasTemplate] = useState(false);
+    const [selectedFile, setSelectedFile] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
     const templateInputRef = useRef(null);
 
-    // Page load hote hi check karo ki template DB me hai ya nahi
     useEffect(() => {
-        checkTemplateStatus();
-    }, []);
-
-    const checkTemplateStatus = async () => {
-        try {
-            const res = await api.get('/check-manifest-template');
-            if (res.data && res.data.exists) {
-                setHasTemplate(true);
-            } else {
+        const checkTemplate = async () => {
+            if (!selectedMarketplaceId) {
+                setHasTemplate(false);
+                return;
+            }
+            try {
+                const res = await api.get('/check-manifest-template', { params: { marketplace_id: selectedMarketplaceId } });
+                setHasTemplate(res.data.exists);
+            } catch (error) {
+                console.error("Error checking template:", error);
                 setHasTemplate(false);
             }
-        } catch (error) {
-            console.error("Failed to check template status", error);
-        }
-    };
+        };
+        checkTemplate();
+    }, [selectedMarketplaceId]);
 
     const handleTemplateUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        e.preventDefault();
+        if (!selectedFile) return alert("Please select a file first!");
+        if (!selectedMarketplaceId) return alert("Please select a marketplace first!");
 
         const formData = new FormData();
-        formData.append("file", file);
-        formData.append("fileType", "Manifest_Template"); // Backend ko batane ke liye ki ye normal upload nahi, template hai
+        formData.append("file", selectedFile);
+        formData.append("fileType", "Manifest_Template"); 
+        formData.append("marketplace_id", selectedMarketplaceId);
 
         setIsUploading(true);
         try {
@@ -45,12 +52,12 @@ const Manifest = () => {
                 headers: { "Content-Type": "multipart/form-data" }
             });
             alert("Template uploaded successfully!");
-            setHasTemplate(true); // Upload hote hi button disable ho jayega
+            setIsUploadModalOpen(false);
+            setSelectedFile(null);
         } catch (error) {
             alert("Failed to upload template. " + (error.response?.data?.message || ""));
         } finally {
             setIsUploading(false);
-            if (templateInputRef.current) templateInputRef.current.value = ""; // Input ko clear karo
         }
     };
 
@@ -58,10 +65,17 @@ const Manifest = () => {
     const totalQuantity = manifestData.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
 
     // --- TEMPLATE BASED EXCEL EXPORT (Backend API) ---
-    const handleExportExcel = async () => {
+    const handleExportExcel = async (e) => {
+        e.preventDefault();
+        if (!selectedMarketplaceId) return alert("Please select a marketplace first!");
+
+        setIsUploading(true); // Re-using loading state for export spinner
         try {
             // Frontend se data backend bhej rahe hain file me bharne ke liye
-            const response = await api.post('/download-manifest', { manifestData }, {
+            const response = await api.post('/download-manifest', { 
+                manifestData, 
+                marketplace_id: selectedMarketplaceId 
+            }, {
                 responseType: 'blob' // Blob isliye kyunki binary file wapas aayegi
             });
 
@@ -70,13 +84,16 @@ const Manifest = () => {
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = `Manifest_With_Template_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            link.download = `Manifest_${selectedMarketplaceId}_${new Date().toISOString().slice(0, 10)}.xlsx`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            setIsExportModalOpen(false);
         } catch (error) {
             console.error("Export error", error);
-            alert("Failed to export! Make sure you have uploaded the Manifest Template first.");
+            alert("Failed to export! Make sure you have uploaded the Manifest Template for this marketplace first.");
+        } finally {
+            setIsUploading(false);
         }
     };
 
@@ -98,24 +115,18 @@ const Manifest = () => {
                 </div>
 
                 <div className="flex items-center gap-3">
-                    {/* 🔥 HIDDEN FILE INPUT & UPLOAD BUTTON */}
-                    <input
-                        type="file"
-                        accept=".xlsx, .xls, .csv"
-                        className="hidden"
-                        ref={templateInputRef}
-                        onChange={handleTemplateUpload}
-                    />
                     <button
-                        onClick={() => templateInputRef.current.click()}
-                        disabled={hasTemplate || isUploading}
-                        title={hasTemplate ? "Template already uploaded. Delete it from Uploads page to add a new one." : "Upload Manifest Template"}
-                        className={`flex items-center gap-2 px-4 py-2 border border-[#D9DDE5] rounded-[5px] text-xs font-semibold shadow-sm transition-all ${hasTemplate || isUploading
-                            ? 'opacity-50 cursor-not-allowed bg-gray-50 text-gray-400'
-                            : 'bg-white text-[#1C2340] hover:bg-[#F4F5F7]'
-                            }`}
+                        onClick={() => {
+                            if (hasTemplate) {
+                                alert("Template already uploaded for this marketplace. Delete it from the Uploads page if you want to upload a new one.");
+                            } else {
+                                setIsUploadModalOpen(true);
+                            }
+                        }}
+                        className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold shadow-sm transition-all rounded-[5px] border ${hasTemplate ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-[#1C2340] hover:bg-[#F4F5F7] border-[#D9DDE5]'}`}
+                        title={hasTemplate ? "Template already exists. Delete it from Uploads page first." : "Upload a new template"}
                     >
-                        {isUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} className={hasTemplate ? "text-gray-400" : "text-[#5A5DF6]"} />}
+                        <Upload size={14} className={hasTemplate ? "text-gray-400" : "text-[#5A5DF6]"} />
                         {hasTemplate ? "Template Uploaded" : "Upload Template"}
                     </button>
 
@@ -128,7 +139,13 @@ const Manifest = () => {
 
                     {/* Export as Excel Button */}
                     <button
-                        onClick={handleExportExcel}
+                        onClick={(e) => { 
+                            if (selectedMarketplaceId) {
+                                handleExportExcel(e);
+                            } else {
+                                setIsExportModalOpen(true); 
+                            }
+                        }}
                         disabled={manifestData.length === 0}
                         className="flex items-center gap-2 px-4 py-2 bg-[#22B573] hover:bg-[#1e9d64] text-white rounded-[5px] text-xs font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
@@ -182,6 +199,85 @@ const Manifest = () => {
                     </div>
                 )}
             </div>
+
+            {/* Upload Modal */}
+            {isUploadModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-visible">
+                        <div className="px-6 py-4 border-b border-[#D9DDE5] flex justify-between items-center bg-gray-50 rounded-t-xl">
+                            <h2 className="text-lg font-bold text-[#1C2340] flex items-center gap-2">
+                                <UploadCloud size={20} className="text-[#5A5DF6]" /> Upload Manifest Template
+                            </h2>
+                            <button onClick={() => setIsUploadModalOpen(false)} className="text-gray-400 hover:text-red-500"><X size={18} /></button>
+                        </div>
+                        <form onSubmit={handleTemplateUpload} className="p-6 space-y-5">
+                            <div className="z-50 relative">
+                                <MarketplaceDropdown 
+                                    selectedId={selectedMarketplaceId} 
+                                    onChange={setSelectedMarketplaceId} 
+                                />
+                            </div>
+
+                            <div
+                                className={`border-2 border-dashed border-[#D9DDE5] rounded-[5px] bg-[#F4F5F7]/30 p-8 flex flex-col items-center justify-center transition-colors ${!selectedMarketplaceId || hasTemplate ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#F4F5F7]/80 cursor-pointer'}`}
+                                onClick={() => {
+                                    if (!selectedMarketplaceId) {
+                                        alert("Please select a marketplace first!");
+                                        return;
+                                    }
+                                    if (hasTemplate) {
+                                        alert("Template already uploaded for this marketplace. Delete it from the Uploads page if you want to upload a new one.");
+                                        return;
+                                    }
+                                    templateInputRef.current.click();
+                                }}
+                            >
+                                <input type="file" accept=".xlsx, .xls, .csv" className="hidden" ref={templateInputRef} onChange={(e) => setSelectedFile(e.target.files[0])} />
+                                <div className="w-12 h-12 rounded-full bg-[#5A5DF6]/10 flex items-center justify-center mb-3"><UploadCloud size={24} className="text-[#5A5DF6]" /></div>
+                                <h3 className="text-sm font-bold text-[#1C2340] mb-1">Select File</h3>
+                                {hasTemplate ? (
+                                    <p className="text-xs text-red-500 text-center font-semibold">Template already uploaded!</p>
+                                ) : selectedFile ? (
+                                    <div className="text-center">
+                                        <p className="text-[#5A5DF6] text-xs font-semibold max-w-[200px] truncate">{selectedFile.name}</p>
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-[#1C2340]/50 text-center">Click to browse Template File</p>
+                                )}
+                            </div>
+                            <button type="submit" disabled={isUploading || !selectedFile || !selectedMarketplaceId || hasTemplate} className="w-full bg-[#5A5DF6] text-white py-2.5 rounded-[5px] text-sm font-bold flex justify-center items-center gap-2 hover:bg-[#494ce0] disabled:opacity-70">
+                                {isUploading ? <><Loader2 size={16} className="animate-spin" /> Uploading...</> : "Upload Template"}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Export Modal */}
+            {isExportModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-visible">
+                        <div className="px-6 py-4 border-b border-[#D9DDE5] flex justify-between items-center bg-gray-50 rounded-t-xl">
+                            <h2 className="text-lg font-bold text-[#1C2340] flex items-center gap-2">
+                                <FileSpreadsheet size={20} className="text-[#22B573]" /> Generate Manifest
+                            </h2>
+                            <button onClick={() => setIsExportModalOpen(false)} className="text-gray-400 hover:text-red-500"><X size={18} /></button>
+                        </div>
+                        <form onSubmit={handleExportExcel} className="p-6 space-y-6">
+                            <div className="z-50 relative">
+                                <MarketplaceDropdown 
+                                    selectedId={selectedMarketplaceId} 
+                                    onChange={setSelectedMarketplaceId} 
+                                />
+                            </div>
+                            
+                            <button type="submit" disabled={isUploading || !selectedMarketplaceId} className="w-full bg-[#22B573] text-white py-2.5 rounded-[5px] text-sm font-bold flex justify-center items-center gap-2 hover:bg-[#1e9d64] disabled:opacity-70">
+                                {isUploading ? <><Loader2 size={16} className="animate-spin" /> Generating...</> : "Download Excel"}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

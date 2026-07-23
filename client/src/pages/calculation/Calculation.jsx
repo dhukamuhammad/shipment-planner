@@ -4,15 +4,17 @@ import {
     Search, Download, CalendarDays, Truck, Layers, Package,
     Plus, Upload, SlidersHorizontal, X, Loader2, UploadCloud,
     TrendingDown, TrendingUp, RefreshCcw, ChevronLeft, ChevronRight,
-    Pencil, Trash2, Check, X as CloseIcon
+    Pencil, Trash2, Check, X as CloseIcon, MoreVertical
 } from 'lucide-react';
 import api from '../../services/api';
+import MarketplaceDropdown from '../../components/MarketplaceDropdown';
 
 const Calculation = () => {
     const navigate = useNavigate();
     // --- States ---
     const [searchTerm, setSearchTerm] = useState("");
     const [calculationData, setCalculationData] = useState([]);
+    const [useSuggestedWh, setUseSuggestedWh] = useState(false);
     const [masterData, setMasterData] = useState({
         afs_days: 0, shipment_plan_days: 0, bunch_qty: 0, to_ship_qty: 0
     });
@@ -22,6 +24,10 @@ const Calculation = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [selectedFile, setSelectedFile] = useState(null);
     const fileInputRef = useRef(null);
+
+    // Marketplace state
+    const [selectedMarketplaceId, setSelectedMarketplaceId] = useState("");
+    const [filterMarketplaceId, setFilterMarketplaceId] = useState("");
 
     // Form State
     const [formData, setFormData] = useState({});
@@ -61,14 +67,34 @@ const Calculation = () => {
     // --- FETCH DATA FROM DATABASE ---
     const fetchCalculationData = async () => {
         try {
-            const response = await api.get("/getCalculationData", { params: { _t: Date.now() } });
+            const params = { _t: Date.now() };
+            if (filterMarketplaceId) {
+                params.marketplace_id = filterMarketplaceId;
+            }
+            const response = await api.get("/getCalculationData", { params });
             if (response.data && response.data.data) {
                 // Backend se Master aur Items alag alag aayenge
-                if (response.data.data.master) setMasterData(response.data.data.master);
+                if (response.data.data.master) {
+                    setMasterData(response.data.data.master);
+                    
+                    // Option 2: Auto-select marketplace if dropdown is empty
+                    if (!filterMarketplaceId && response.data.data.master.marketplace_id) {
+                        setFilterMarketplaceId(String(response.data.data.master.marketplace_id));
+                    }
+                }
                 if (response.data.data.items) setCalculationData(response.data.data.items);
             }
         } catch (error) {
             console.error("Error fetching calculation data:", error);
+        }
+
+        try {
+            const settingsRes = await api.get("/settings");
+            if (settingsRes.data?.success && settingsRes.data?.data) {
+                setUseSuggestedWh(settingsRes.data.data.use_suggested_wh === '1');
+            }
+        } catch (error) {
+            console.error("Error fetching settings:", error);
         }
     };
 
@@ -101,6 +127,15 @@ const Calculation = () => {
         }
     };
 
+    // --- REAL-TIME AUTO-SAVE FOR SUGGEST WH ---
+    const handleSuggestAutoSave = async (itemId, val) => {
+        try {
+            await api.put("/update-item-suggest-wh", { itemId, suggestWh: val });
+        } catch (error) {
+            console.error("Failed to save suggest wh:", error);
+        }
+    };
+
     // --- RESET CALCULATIONS BUTTON ---
     const handleResetCalculations = async () => {
         if (!masterData.id) return;
@@ -121,15 +156,21 @@ const Calculation = () => {
     // 🔥 NAYE STATES: Modal Edit & Delete ke liye
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [editFormData, setEditFormData] = useState({});
+    const [activeTab, setActiveTab] = useState('active');
+    const [openMenuRowId, setOpenMenuRowId] = useState(null);
+    const [isTopMenuOpen, setIsTopMenuOpen] = useState(false);
+    const [editingSuggestWh, setEditingSuggestWh] = useState(null);
 
     // --- ROW DELETE HANDLER ---
     const handleDeleteRow = async (itemId) => {
-        if (!window.confirm("Are you sure you want to delete this SKU?")) return;
+        if (!window.confirm("Are you sure you want to delete this SKU?")) return false;
         try {
             await api.delete(`/delete-row/${itemId}`);
             setCalculationData(prev => prev.filter(row => row.id !== itemId));
+            return true;
         } catch (error) {
             alert("Failed to delete row.");
+            return false;
         }
     };
     // --- MODAL EDIT HANDLERS ---
@@ -138,9 +179,11 @@ const Calculation = () => {
             id: row.id,
             groupName: row.group_name, sku: row.sku, title: row.title,
             category: row.category, hsn: row.hsn, gst: row.gst, cost: row.cost,
-            weight: row.weight // 🔥 Naya add kiya
+            weight: row.weight, // 🔥 Naya add kiya
+            isActive: row.is_active !== undefined ? row.is_active : 1
         });
         setIsEditModalOpen(true);
+        setOpenMenuRowId(null);
     };
 
     const handleEditInputChange = (e) => {
@@ -158,6 +201,7 @@ const Calculation = () => {
                 title: editFormData.title, category: editFormData.category,
                 hsn: editFormData.hsn, gst: editFormData.gst, cost: editFormData.cost,
                 weight: editFormData.weight, // 🔥 Naya add kiya
+                is_active: editFormData.isActive, // 🔥 Active status add kiya
                 ref_sku: editFormData.sku, ref_title: editFormData.title
             } : row));
             setIsEditModalOpen(false);
@@ -168,17 +212,20 @@ const Calculation = () => {
 
     useEffect(() => {
         fetchCalculationData();
-    }, []);
+    }, [filterMarketplaceId]);
 
     // --- API Handlers ---
     const handleFileUpload = async (e) => {
         e.preventDefault();
         if (!selectedFile) return alert("Pehle ek file select karein!");
+        if (!selectedMarketplaceId) return alert("Please select a marketplace first!");
+
         setIsLoading(true);
 
         const uploadData = new FormData();
         uploadData.append("file", selectedFile);
         uploadData.append("fileType", "Calculation"); // 🔥 NAYA ADD KIYA: Backend/Middleware ke liye
+        uploadData.append("marketplace_id", selectedMarketplaceId);
 
         try {
             const response = await api.post("/upload", uploadData, {
@@ -291,12 +338,44 @@ const Calculation = () => {
                 totalWeight = Number(displayFinalWh) * weight;
             }
 
+            // --- SUGGEST FINAL-WH CALCULATION ---
+            const saleWhAvg = Number(item.sale_wh_avg) || 0;
+            let suggestedShipWh = 0;
+            if (afsDays > 0) {
+                suggestedShipWh = Math.ceil(((saleWhAvg / afsDays) * shipmentPlanDays) - availableQty);
+            }
+
+            let sugIntWh = "";
+            if (!isNaN(suggestedShipWh)) {
+                if (suggestedShipWh >= 0) {
+                    if (suggestedShipWh === 0) sugIntWh = 1;
+                    else if (bunchQty > 0) sugIntWh = Math.trunc(suggestedShipWh / bunchQty);
+                }
+            }
+
+            let sugDecWh = "";
+            if (sugIntWh !== "") {
+                if (suggestedShipWh === 0) sugDecWh = 0;
+                else if (bunchQty > 0) sugDecWh = (suggestedShipWh / bunchQty) - sugIntWh;
+            }
+
+            let suggestFinalWh = "";
+            if (!isNaN(suggestedShipWh)) {
+                if (suggestedShipWh <= 0) suggestFinalWh = "";
+                else if (sugDecWh === "") suggestFinalWh = "";
+                else suggestFinalWh = (sugIntWh * bunchQty) + (sugDecWh > 0 ? bunchQty : 0);
+            }
+
+            // Override with manual value if flag is set
+            const displaySuggestFinalWh = item.is_manual_suggest_final_wh ? item.suggest_final_wh : suggestFinalWh;
+
             return {
                 ...item,
                 ship_wh: shipWh,
                 int_wh: intWh,
                 dec_wh: decWh,
                 final_wh: displayFinalWh, // Final column me ye value jayegi
+                suggest_final_wh: displaySuggestFinalWh,
                 total_weight: totalWeight
             };
         });
@@ -309,18 +388,47 @@ const Calculation = () => {
         }, 0);
     }, [displayData]);
 
+    const totalToSuggestShip = React.useMemo(() => {
+        return displayData.reduce((total, item) => {
+            const val = Number(item.suggest_final_wh);
+            return total + (isNaN(val) ? 0 : val);
+        }, 0);
+    }, [displayData]);
+
+    // Calculate which variant columns actually have data
+    const activeVariantCols = useMemo(() => {
+        const variantKeys = ['sky_blue', 'dark_blue', 'brown', 'green', 'tan', 'black', 'red', 'grey'];
+        const active = {};
+        variantKeys.forEach(k => active[k] = false);
+
+        displayData.forEach(item => {
+            variantKeys.forEach(k => {
+                const val = item[`apr_${k}`];
+                if (val !== undefined && val !== null && val !== 0 && val !== "0" && val !== "") {
+                    active[k] = true;
+                }
+            });
+        });
+        return active;
+    }, [displayData]);
 
     // Filter Logic for Search Bar
-    const filteredData = displayData.filter(item =>
-        (item.group_name && item.group_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.sku && item.sku.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.title && item.title.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.hsn && item.hsn.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.gst && item.gst.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.cost && item.cost.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.weight && item.weight.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    const filteredData = displayData.filter(item => {
+        const isItemActive = item.is_active !== 0; // default 1 (active)
+        const matchesTab = activeTab === 'active' ? isItemActive : !isItemActive;
+        if (!matchesTab) return false;
+
+        return (
+            (item.group_name && item.group_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (item.sku && item.sku.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (item.title && item.title.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (item.hsn && item.hsn.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (item.gst && item.gst.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (item.cost && item.cost.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (item.weight && item.weight.toLowerCase().includes(searchTerm.toLowerCase()))
+        );
+    });
 
     const closedCount = Object.values(collapsedGroups).filter(Boolean).length;
     // Agar 2 ya usse zyada group close hain, to font bada karo
@@ -335,7 +443,7 @@ const Calculation = () => {
         sky_blue: 85, dark_blue: 85, brown: 85, green: 85, tan: 85, black: 85, red: 85, grey: 85,
         weight: 80, total_weight: 110, hsn: 80, gst: 70, cost: 80,
         ref_sku: 130, ref_title: 200, tra_qty: 85, quantity: 85, available_qty: 110,
-        fc_id: 75, sale_total: 95, sale_wh: 95, ship_wh: 95, sum_val: 75, final_wh: 95
+        fc_id: 75, sale_total: 95, sale_wh: 95, sale_wh_avg: 130, ship_wh: 95, sum_val: 75, final_wh: 95, suggest_final_wh: 120
     };
 
     const colWidthsRef = useRef((() => {
@@ -359,7 +467,7 @@ const Calculation = () => {
         if (initWHSpan > 0) total += collapsedGroups.initialWH ? 40 : ((visibleColumns.int_wh ? w.int_wh : 0) + (visibleColumns.dec_wh ? w.dec_wh : 0) + (visibleColumns.non_apron_qty ? w.non_apron_qty : 0));
         if (variantsSpan > 0) total += collapsedGroups.variants ? 40 : ((visibleColumns.sky_blue ? w.sky_blue : 0) + (visibleColumns.dark_blue ? w.dark_blue : 0) + (visibleColumns.brown ? w.brown : 0) + (visibleColumns.green ? w.green : 0) + (visibleColumns.tan ? w.tan : 0) + (visibleColumns.black ? w.black : 0) + (visibleColumns.red ? w.red : 0) + (visibleColumns.grey ? w.grey : 0));
         if (specsSpan > 0) total += collapsedGroups.specs ? 40 : ((visibleColumns.weight ? w.weight : 0) + (visibleColumns.total_weight ? w.total_weight : 0) + (visibleColumns.hsn ? w.hsn : 0) + (visibleColumns.gst ? w.gst : 0) + (visibleColumns.cost ? w.cost : 0));
-        if (logisticsSpan > 0) total += collapsedGroups.logistics ? 40 : ((visibleColumns.ref_sku ? w.ref_sku : 0) + (visibleColumns.ref_title ? w.ref_title : 0) + (visibleColumns.tra_qty ? w.tra_qty : 0) + (visibleColumns.quantity ? w.quantity : 0) + (visibleColumns.available_qty ? w.available_qty : 0) + (visibleColumns.fc_id ? w.fc_id : 0) + (visibleColumns.sale_total ? w.sale_total : 0) + (visibleColumns.sale_wh ? w.sale_wh : 0) + (visibleColumns.ship_wh ? w.ship_wh : 0) + (visibleColumns.sum_val ? w.sum_val : 0) + (visibleColumns.final_wh ? w.final_wh : 0));
+        if (logisticsSpan > 0) total += collapsedGroups.logistics ? 40 : ((visibleColumns.ref_sku ? w.ref_sku : 0) + (visibleColumns.ref_title ? w.ref_title : 0) + (visibleColumns.tra_qty ? w.tra_qty : 0) + (visibleColumns.quantity ? w.quantity : 0) + (visibleColumns.available_qty ? w.available_qty : 0) + (visibleColumns.fc_id ? w.fc_id : 0) + /*(visibleColumns.sale_total ? w.sale_total : 0) +*/ (visibleColumns.sale_wh ? w.sale_wh : 0) + (visibleColumns.sale_wh_avg ? w.sale_wh_avg : 0) + (visibleColumns.ship_wh ? w.ship_wh : 0) + (visibleColumns.sum_val ? w.sum_val : 0) + (visibleColumns.final_wh ? w.final_wh : 0) + (visibleColumns.suggest_final_wh ? w.suggest_final_wh : 0));
 
         return total;
     };
@@ -403,7 +511,7 @@ const Calculation = () => {
         int_wh: true, dec_wh: true, non_apron_qty: true,
         sky_blue: true, dark_blue: true, brown: true, green: true, tan: true, black: true, red: true, grey: true,
         weight: true, total_weight: true, hsn: true, gst: true, cost: true,
-        ref_sku: true, ref_title: true, tra_qty: true, quantity: true, available_qty: true, fc_id: true, sale_total: true, sale_wh: true, ship_wh: true, sum_val: true, final_wh: true
+        ref_sku: true, ref_title: true, tra_qty: true, quantity: true, available_qty: true, fc_id: true, sale_total: true, sale_wh: true, sale_wh_avg: true, ship_wh: true, sum_val: true, final_wh: true, suggest_final_wh: true
     };
 
     const [visibleColumns, setVisibleColumns] = useState(() => {
@@ -428,9 +536,9 @@ const Calculation = () => {
     const getColSpan = (cols) => cols.filter(c => visibleColumns[c]).length;
     const productSpan = getColSpan(['group_name', 'sku', 'title', 'category']);
     const initWHSpan = getColSpan(['int_wh', 'dec_wh', 'non_apron_qty']);
-    const variantsSpan = getColSpan(['sky_blue', 'dark_blue', 'brown', 'green', 'tan', 'black', 'red', 'grey']);
+    const variantsSpan = getColSpan(['sky_blue', 'dark_blue', 'brown', 'green', 'tan', 'black', 'red', 'grey'].filter(c => activeVariantCols[c]));
     const specsSpan = getColSpan(['weight', 'total_weight', 'hsn', 'gst', 'cost']);
-    const logisticsSpan = getColSpan(['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', 'fc_id', 'sale_total', 'sale_wh', 'ship_wh', 'sum_val', 'final_wh']);
+    const logisticsSpan = getColSpan(['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', 'fc_id', /*'sale_total',*/ 'sale_wh', 'sale_wh_avg', 'ship_wh', 'sum_val', 'final_wh', 'suggest_final_wh']);
 
     // 🔥 NAYA: Group Checkbox Toggle Logic
     const colGroupsConfig = {
@@ -438,7 +546,7 @@ const Calculation = () => {
         initialWH: ['int_wh', 'dec_wh', 'non_apron_qty'],
         variants: ['sky_blue', 'dark_blue', 'brown', 'green', 'tan', 'black', 'red', 'grey'],
         specs: ['weight', 'total_weight', 'hsn', 'gst', 'cost'],
-        logistics: ['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', 'fc_id', 'sale_total', 'sale_wh', 'ship_wh', 'sum_val', 'final_wh']
+        logistics: ['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', 'fc_id', /*'sale_total',*/ 'sale_wh', 'sale_wh_avg', 'ship_wh', 'sum_val', 'final_wh', 'suggest_final_wh']
     };
 
     const handleGroupToggle = (groupKey, isChecked) => {
@@ -454,128 +562,170 @@ const Calculation = () => {
         <div className="space-y-3 relative pb-2">
             {/* COMPACT HEADER SECTION */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
-                <div>
+                <div className="flex items-center gap-4">
                     <h1 className="text-lg font-bold text-[#1C2340] leading-tight">Shipment Calculation</h1>
+
+                    <div className="w-px h-5 bg-[#D9DDE5]"></div>
+
+                    <div className="flex items-center gap-2">
+                        <Truck size={14} className="text-[#5A5DF6]" />
+                        <span className="text-[11px] font-bold text-[#1C2340]/60 uppercase tracking-wider">Shipment Plan</span>
+                        <input
+                            type="number"
+                            value={masterData.shipment_plan_days || ''}
+                            onChange={(e) => {
+                                setMasterData({ ...masterData, shipment_plan_days: e.target.value });
+                                handleMasterAutoSave('shipment_plan_days', e.target.value);
+                            }}
+                            onWheel={handleWheelBlur}
+                            className="text-sm font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-12 px-0.5 py-0 transition-colors"
+                        />
+                        <span className="text-[10px] font-semibold text-[#1C2340]/40">Days</span>
+                    </div>
+
+                    <div className="w-px h-5 bg-[#D9DDE5]"></div>
+
+                    <div className="flex items-center gap-2">
+                        <Layers size={14} className="text-[#5A5DF6]" />
+                        <span className="text-[11px] font-bold text-[#1C2340]/60 uppercase tracking-wider">Bunch Qty</span>
+                        <input
+                            type="number"
+                            value={masterData.bunch_qty || ''}
+                            onChange={(e) => {
+                                setMasterData({ ...masterData, bunch_qty: e.target.value });
+                                handleMasterAutoSave('bunch_qty', e.target.value);
+                            }}
+                            onWheel={handleWheelBlur}
+                            className="text-sm font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-12 px-0.5 py-0 transition-colors"
+                        />
+                    </div>
+
+                    <div className="w-px h-5 bg-[#D9DDE5]"></div>
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
+                    <div className="w-48 mt-[2px]">
+                        <MarketplaceDropdown 
+                            selectedId={filterMarketplaceId} 
+                            onChange={setFilterMarketplaceId} 
+                            hideLabel={true}
+                        />
+                    </div>
+                    <div className="hidden md:block w-px h-4 bg-[#D9DDE5] mx-0.5"></div>
                     <button onClick={handleResetCalculations}
                         title="Manually edited Final-WH values ko formula se reset karega"
                         className="flex items-center gap-2 px-4 py-2 bg-white border border-[#D9DDE5] rounded-[5px] text-xs font-semibold text-[#E74C3C] hover:bg-red-50 shadow-sm"
                     >
-                        <RefreshCcw size={12} /> Reset Formulas
+                        <RefreshCcw size={12} />
                     </button>
                     <button onClick={() => setIsUploadModalOpen(true)} disabled={calculationData.length > 0} title={calculationData.length > 0 ? "Delete old plan to upload new" : "Upload File"} className={`flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#D9DDE5] rounded-[4px] text-[11px] font-semibold shadow-sm transition-all ${calculationData.length > 0 ? 'opacity-50 cursor-not-allowed text-gray-400' : 'text-[#1C2340] hover:bg-[#F4F5F7]'}`}>
                         <Upload size={12} className={calculationData.length > 0 ? "text-gray-400" : "text-[#5A5DF6]"} /> Upload
-                    </button>
-                    <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#5A5DF6] hover:bg-[#494ce0] text-white rounded-[4px] text-[11px] font-semibold shadow-sm">
-                        <Plus size={12} /> Add SKU
                     </button>
                     <div className="hidden md:block w-px h-4 bg-[#D9DDE5] mx-0.5"></div>
                     <button
                         onClick={() => {
                             // Sirf wo SKUs bhejo jinka Final-WH value 0 se zyada hai
                             const manifestSkus = filteredData
-                                .filter(item => Number(item.final_wh) > 0)
+                                .filter(item => {
+                                    const qty = useSuggestedWh ? Number(item.suggest_final_wh) : Number(item.final_wh);
+                                    return qty > 0;
+                                })
                                 .map(item => ({
                                     sku: item.sku,
-                                    quantity: item.final_wh,
+                                    quantity: useSuggestedWh ? item.suggest_final_wh : item.final_wh,
                                     fc: item.fulfilment_id,
                                     hsn_sac_code: item.hsn,
                                     gst_rate: item.gst,
                                     declared_value_per_unit: item.cost
                                 }));
-                            navigate('/manifest', { state: { manifestSkus } });
+                            navigate('/manifest', { state: { manifestSkus, marketplace_id: filterMarketplaceId } });
                         }}
                         title="Final-WH wale SKUs ka manifest banayein"
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#D9DDE5] rounded-[4px] text-[11px] font-semibold text-[#1C2340] hover:bg-[#F4F5F7] shadow-sm"
                     >
-                        <Package size={12} /> Generate Manifest
+                        <Download size={12} className="text-[#5A5DF6]" /> Manifest
                     </button>
-                </div>
-            </div>
 
-            {/* SLIM SINGLE-ROW SETTINGS STRIP (Table ke liye zyada space free karne ke liye) */}
-            <div className="bg-white border border-[#D9DDE5] rounded-[5px] px-4 py-2 flex items-center gap-6 shadow-sm flex-wrap">
-                <div className="flex items-center gap-2">
-                    <CalendarDays size={14} className="text-[#5A5DF6]" />
-                    <span className="text-[11px] font-bold text-[#1C2340]/60 uppercase tracking-wider">AFS Days</span>
-                    <input
-                        type="number"
-                        value={masterData.afs_days || ''}
-                        onChange={(e) => {
-                            setMasterData({ ...masterData, afs_days: e.target.value });
-                            handleMasterAutoSave('afs_days', e.target.value);
-                        }}
-                        onWheel={handleWheelBlur}
-                        className="text-sm font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-12 px-0.5 py-0 transition-colors"
-                    />
-                </div>
+                    <div className="relative">
+                        <button
+                            onClick={() => setIsTopMenuOpen(!isTopMenuOpen)}
+                            className="p-1.5 text-[#1C2340]/60 hover:text-[#1C2340] hover:bg-gray-100 rounded border border-[#D9DDE5] transition-colors bg-white shadow-sm"
+                        >
+                            <MoreVertical size={16} />
+                        </button>
 
-                <div className="w-px h-5 bg-[#D9DDE5]"></div>
-
-                <div className="flex items-center gap-2">
-                    <Truck size={14} className="text-[#5A5DF6]" />
-                    <span className="text-[11px] font-bold text-[#1C2340]/60 uppercase tracking-wider">Shipment Plan</span>
-                    <input
-                        type="number"
-                        value={masterData.shipment_plan_days || ''}
-                        onChange={(e) => {
-                            setMasterData({ ...masterData, shipment_plan_days: e.target.value });
-                            handleMasterAutoSave('shipment_plan_days', e.target.value);
-                        }}
-                        onWheel={handleWheelBlur}
-                        className="text-sm font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-12 px-0.5 py-0 transition-colors"
-                    />
-                    <span className="text-[10px] font-semibold text-[#1C2340]/40">Days</span>
-                </div>
-
-                <div className="w-px h-5 bg-[#D9DDE5]"></div>
-
-                <div className="flex items-center gap-2">
-                    <Layers size={14} className="text-[#5A5DF6]" />
-                    <span className="text-[11px] font-bold text-[#1C2340]/60 uppercase tracking-wider">Bunch Qty</span>
-                    <input
-                        type="number"
-                        value={masterData.bunch_qty || ''}
-                        onChange={(e) => {
-                            setMasterData({ ...masterData, bunch_qty: e.target.value });
-                            handleMasterAutoSave('bunch_qty', e.target.value);
-                        }}
-                        onWheel={handleWheelBlur}
-                        className="text-sm font-bold text-[#1C2340] bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none w-12 px-0.5 py-0 transition-colors"
-                    />
-                </div>
-
-                <div className="w-px h-5 bg-[#D9DDE5]"></div>
-
-                <div className="flex items-center gap-2 ml-auto bg-[#5A5DF6]/10 px-3 py-1 rounded-[4px]">
-                    <Package size={14} className="text-[#5A5DF6]" />
-                    <span className="text-[11px] font-bold text-[#5A5DF6] uppercase tracking-wider">To Ship</span>
-                    <span className="text-sm font-bold text-[#1C2340]">{totalToShip.toLocaleString()}</span>
+                        {isTopMenuOpen && (
+                            <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-[#D9DDE5] rounded shadow-lg py-1 w-32">
+                                <button
+                                    onClick={() => { setActiveTab('active'); setIsTopMenuOpen(false); }}
+                                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:bg-gray-50 ${activeTab === 'active' ? 'text-[#22B573] font-bold' : 'text-[#1C2340]'}`}
+                                >
+                                    <div className={`w-2 h-2 rounded-full ${activeTab === 'active' ? 'bg-[#22B573]' : 'bg-transparent'}`}></div> Active
+                                </button>
+                                <button
+                                    onClick={() => { setActiveTab('inactive'); setIsTopMenuOpen(false); }}
+                                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:bg-gray-50 ${activeTab === 'inactive' ? 'text-[#E74C3C] font-bold' : 'text-[#1C2340]'}`}
+                                >
+                                    <div className={`w-2 h-2 rounded-full ${activeTab === 'inactive' ? 'bg-[#E74C3C]' : 'bg-transparent'}`}></div> Inactive
+                                </button>
+                                <div className="border-t border-[#D9DDE5] my-1"></div>
+                                <button
+                                    onClick={() => { setIsAddModalOpen(true); setIsTopMenuOpen(false); }}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-[#5A5DF6] hover:bg-gray-50 flex items-center gap-2 font-semibold"
+                                >
+                                    <Plus size={12} /> Add SKU
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 
             {/* Main Table Card */}
-            <div className="bg-white border border-[#D9DDE5] rounded-[5px] shadow-sm flex flex-col min-w-0 overflow-hidden">
+            <div className="bg-white border border-[#D9DDE5] rounded-[5px] shadow-sm flex flex-col min-w-0 overflow-hidden mt-3">
 
                 {/* COMPACT TABLE TOOLBAR (Updated with Filter Click Handler) */}
-                <div className="px-3 py-2 border-b border-[#D9DDE5] flex items-center justify-between bg-[#F9FAFB] rounded-t-[5px]">
-                    <div className="relative w-full max-w-xs">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#1C2340]/40" size={14} />
-                        <input type="text" placeholder="Search by SKU or Title..." className="w-full pl-8 pr-3 py-1.5 text-[11px] border border-[#D9DDE5] rounded-[4px] focus:outline-none focus:border-[#5A5DF6]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#1C2340]/60 pr-3 border-r border-[#D9DDE5]">
-                            <Layers size={12} /> <span>{filteredData.length} SKUs</span>
+                <div className="px-3 py-2 border-b border-[#D9DDE5] flex flex-wrap gap-2 items-center justify-between bg-[#F9FAFB] rounded-t-[5px]">
+                    <div className="flex items-center gap-4 w-full md:w-auto">
+                        <div className="flex items-center gap-2">
+                            <div className="relative w-full max-w-xs">
+                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#1C2340]/40" size={14} />
+                                <input type="text" placeholder="Search by SKU or Title..." className="w-full pl-8 pr-3 py-1.5 text-[11px] border border-[#D9DDE5] rounded-[4px] focus:outline-none focus:border-[#5A5DF6]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#1C2340]/60 bg-[#D9DDE5]/30 px-2 py-1.5 rounded-[4px] whitespace-nowrap">
+                                <Layers size={12} /> <span>{filteredData.length} SKUs</span>
+                            </div>
                         </div>
+
+                        <div className="w-px h-5 bg-[#D9DDE5] hidden md:block"></div>
+
+                        <div className="flex items-center gap-2 whitespace-nowrap">
+                            <CalendarDays size={14} className="text-[#5A5DF6]" />
+                            <span className="text-[11px] font-bold text-[#1C2340]/60 uppercase tracking-wider">AFS Days</span>
+                            <span className="text-sm font-bold text-[#1C2340] px-0.5">{masterData.afs_days || 0}</span>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 bg-orange-50 px-3 py-1 rounded-[4px] border border-orange-100">
+                            <Package size={14} className="text-[#5A5DF6]" />
+                            <span className="text-[11px] font-bold text-[#5A5DF6] uppercase tracking-wider">To Suggest Ship</span>
+                            <span className="text-sm font-bold text-[#1C2340]">{totalToSuggestShip.toLocaleString()}</span>
+                        </div>
+
+                        <div className="flex items-center gap-2 bg-[#5A5DF6]/10 px-3 py-1 rounded-[4px]">
+                            <Package size={14} className="text-[#5A5DF6]" />
+                            <span className="text-[11px] font-bold text-[#5A5DF6] uppercase tracking-wider">To Ship</span>
+                            <span className="text-sm font-bold text-[#1C2340]">{totalToShip.toLocaleString()}</span>
+                        </div>
+
                         {/* 🔥 Filter Modal Trigger Button */}
                         <button onClick={() => setIsColumnFilterOpen(true)} className="p-1 text-[#1C2340]/60 hover:text-[#5A5DF6] hover:bg-[#5A5DF6]/10 rounded-[3px] transition-colors"><SlidersHorizontal size={14} /></button>
                     </div>
                 </div>
 
                 {/* 🔥 COMPLETE EXCEL-STYLE TABLE WITH FILTER & ACTIONS 🔥 */}
-                <div className="w-full overflow-x-auto overflow-y-auto custom-scrollbar min-h-[300px] max-h-[79vh] bg-white">
+                <div className="w-full overflow-x-auto overflow-y-auto custom-scrollbar bg-white" style={{ height: 'calc(100vh - 180px)' }}>
                     {filteredData.length === 0 ? (
                         <div className="flex justify-center items-center h-full min-h-[300px]">
                             <p className="text-sm text-[#1C2340]/50 font-medium py-10">No data found in database. Please upload a report.</p>
@@ -601,14 +751,14 @@ const Calculation = () => {
                                 </>)}
 
                                 {variantsSpan > 0 && (collapsedGroups.variants ? <col style={{ width: 40 }} /> : <>
-                                    {visibleColumns.sky_blue && <col ref={el => colRefs.current.sky_blue = el} style={{ width: colWidthsRef.current.sky_blue }} />}
-                                    {visibleColumns.dark_blue && <col ref={el => colRefs.current.dark_blue = el} style={{ width: colWidthsRef.current.dark_blue }} />}
-                                    {visibleColumns.brown && <col ref={el => colRefs.current.brown = el} style={{ width: colWidthsRef.current.brown }} />}
-                                    {visibleColumns.green && <col ref={el => colRefs.current.green = el} style={{ width: colWidthsRef.current.green }} />}
-                                    {visibleColumns.tan && <col ref={el => colRefs.current.tan = el} style={{ width: colWidthsRef.current.tan }} />}
-                                    {visibleColumns.black && <col ref={el => colRefs.current.black = el} style={{ width: colWidthsRef.current.black }} />}
-                                    {visibleColumns.red && <col ref={el => colRefs.current.red = el} style={{ width: colWidthsRef.current.red }} />}
-                                    {visibleColumns.grey && <col ref={el => colRefs.current.grey = el} style={{ width: colWidthsRef.current.grey }} />}
+                                    {visibleColumns.sky_blue && activeVariantCols.sky_blue && <col ref={el => colRefs.current.sky_blue = el} style={{ width: colWidthsRef.current.sky_blue }} />}
+                                    {visibleColumns.dark_blue && activeVariantCols.dark_blue && <col ref={el => colRefs.current.dark_blue = el} style={{ width: colWidthsRef.current.dark_blue }} />}
+                                    {visibleColumns.brown && activeVariantCols.brown && <col ref={el => colRefs.current.brown = el} style={{ width: colWidthsRef.current.brown }} />}
+                                    {visibleColumns.green && activeVariantCols.green && <col ref={el => colRefs.current.green = el} style={{ width: colWidthsRef.current.green }} />}
+                                    {visibleColumns.tan && activeVariantCols.tan && <col ref={el => colRefs.current.tan = el} style={{ width: colWidthsRef.current.tan }} />}
+                                    {visibleColumns.black && activeVariantCols.black && <col ref={el => colRefs.current.black = el} style={{ width: colWidthsRef.current.black }} />}
+                                    {visibleColumns.red && activeVariantCols.red && <col ref={el => colRefs.current.red = el} style={{ width: colWidthsRef.current.red }} />}
+                                    {visibleColumns.grey && activeVariantCols.grey && <col ref={el => colRefs.current.grey = el} style={{ width: colWidthsRef.current.grey }} />}
                                 </>)}
 
                                 {specsSpan > 0 && (collapsedGroups.specs ? <col style={{ width: 40 }} /> : <>
@@ -626,11 +776,13 @@ const Calculation = () => {
                                     {visibleColumns.quantity && <col ref={el => colRefs.current.quantity = el} style={{ width: colWidthsRef.current.quantity }} />}
                                     {visibleColumns.available_qty && <col ref={el => colRefs.current.available_qty = el} style={{ width: colWidthsRef.current.available_qty }} />}
                                     {visibleColumns.fc_id && <col ref={el => colRefs.current.fc_id = el} style={{ width: colWidthsRef.current.fc_id }} />}
-                                    {visibleColumns.sale_total && <col ref={el => colRefs.current.sale_total = el} style={{ width: colWidthsRef.current.sale_total }} />}
+                                    {/* {visibleColumns.sale_total && <col ref={el => colRefs.current.sale_total = el} style={{ width: colWidthsRef.current.sale_total }} />} */}
+                                    {visibleColumns.sale_wh_avg && <col ref={el => colRefs.current.sale_wh_avg = el} style={{ width: colWidthsRef.current.sale_wh_avg }} />}
                                     {visibleColumns.sale_wh && <col ref={el => colRefs.current.sale_wh = el} style={{ width: colWidthsRef.current.sale_wh }} />}
                                     {visibleColumns.ship_wh && <col ref={el => colRefs.current.ship_wh = el} style={{ width: colWidthsRef.current.ship_wh }} />}
                                     {visibleColumns.sum_val && <col ref={el => colRefs.current.sum_val = el} style={{ width: colWidthsRef.current.sum_val }} />}
                                     {visibleColumns.final_wh && <col ref={el => colRefs.current.final_wh = el} style={{ width: colWidthsRef.current.final_wh }} />}
+                                    {visibleColumns.suggest_final_wh && <col ref={el => colRefs.current.suggest_final_wh = el} style={{ width: colWidthsRef.current.suggest_final_wh }} />}
                                 </>)}
                             </colgroup>
 
@@ -712,14 +864,14 @@ const Calculation = () => {
 
                                     {variantsSpan > 0 && !collapsedGroups.variants && (
                                         <>
-                                            {visibleColumns.sky_blue && <th style={{ width: colWidthsRef.current.sky_blue, minWidth: colWidthsRef.current.sky_blue }} className="px-3 py-3 text-center border-l border-[#D9DDE5]/50 bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#38BDF8]"></span>Sky Blue</div><div onMouseDown={handleResizeMouseDown('sky_blue')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                            {visibleColumns.dark_blue && <th style={{ width: colWidthsRef.current.dark_blue, minWidth: colWidthsRef.current.dark_blue }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#1E40AF]"></span>Dark Blue</div><div onMouseDown={handleResizeMouseDown('dark_blue')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                            {visibleColumns.brown && <th style={{ width: colWidthsRef.current.brown, minWidth: colWidthsRef.current.brown }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#92400E]"></span>Brown</div><div onMouseDown={handleResizeMouseDown('brown')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                            {visibleColumns.green && <th style={{ width: colWidthsRef.current.green, minWidth: colWidthsRef.current.green }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#22B573]"></span>Green</div><div onMouseDown={handleResizeMouseDown('green')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                            {visibleColumns.tan && <th style={{ width: colWidthsRef.current.tan, minWidth: colWidthsRef.current.tan }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#D2B48C]"></span>Tan</div><div onMouseDown={handleResizeMouseDown('tan')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                            {visibleColumns.black && <th style={{ width: colWidthsRef.current.black, minWidth: colWidthsRef.current.black }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#1C2340]"></span>Black</div><div onMouseDown={handleResizeMouseDown('black')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                            {visibleColumns.red && <th style={{ width: colWidthsRef.current.red, minWidth: colWidthsRef.current.red }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#E74C3C]"></span>Red</div><div onMouseDown={handleResizeMouseDown('red')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                            {visibleColumns.grey && <th style={{ width: colWidthsRef.current.grey, minWidth: colWidthsRef.current.grey }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#9CA3AF]"></span>Grey</div><div onMouseDown={handleResizeMouseDown('grey')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.sky_blue && activeVariantCols.sky_blue && <th style={{ width: colWidthsRef.current.sky_blue, minWidth: colWidthsRef.current.sky_blue }} className="px-3 py-3 text-center border-l border-[#D9DDE5]/50 bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#38BDF8]"></span>Sky Blue</div><div onMouseDown={handleResizeMouseDown('sky_blue')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.dark_blue && activeVariantCols.dark_blue && <th style={{ width: colWidthsRef.current.dark_blue, minWidth: colWidthsRef.current.dark_blue }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#1E40AF]"></span>Dark Blue</div><div onMouseDown={handleResizeMouseDown('dark_blue')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.brown && activeVariantCols.brown && <th style={{ width: colWidthsRef.current.brown, minWidth: colWidthsRef.current.brown }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#92400E]"></span>Brown</div><div onMouseDown={handleResizeMouseDown('brown')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.green && activeVariantCols.green && <th style={{ width: colWidthsRef.current.green, minWidth: colWidthsRef.current.green }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#22B573]"></span>Green</div><div onMouseDown={handleResizeMouseDown('green')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.tan && activeVariantCols.tan && <th style={{ width: colWidthsRef.current.tan, minWidth: colWidthsRef.current.tan }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#D2B48C]"></span>Tan</div><div onMouseDown={handleResizeMouseDown('tan')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.black && activeVariantCols.black && <th style={{ width: colWidthsRef.current.black, minWidth: colWidthsRef.current.black }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#1C2340]"></span>Black</div><div onMouseDown={handleResizeMouseDown('black')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.red && activeVariantCols.red && <th style={{ width: colWidthsRef.current.red, minWidth: colWidthsRef.current.red }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#E74C3C]"></span>Red</div><div onMouseDown={handleResizeMouseDown('red')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.grey && activeVariantCols.grey && <th style={{ width: colWidthsRef.current.grey, minWidth: colWidthsRef.current.grey }} className="px-3 py-3 text-center bg-purple-50 relative group"><div className="flex items-center justify-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#9CA3AF]"></span>Grey</div><div onMouseDown={handleResizeMouseDown('grey')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                         </>
                                     )}
 
@@ -738,14 +890,16 @@ const Calculation = () => {
                                             {visibleColumns.ref_sku && <th style={{ width: colWidthsRef.current.ref_sku, minWidth: colWidthsRef.current.ref_sku }} className="px-4 py-3 border-l border-[#D9DDE5]/50 bg-orange-50 font-semibold text-[#1C2340] relative group">SKU (Ref)<div onMouseDown={handleResizeMouseDown('ref_sku')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                             {visibleColumns.ref_title && <th style={{ width: colWidthsRef.current.ref_title, minWidth: colWidthsRef.current.ref_title, maxWidth: colWidthsRef.current.ref_title }} className="px-4 py-3 bg-orange-50 font-semibold text-[#1C2340] relative group">Title (Ref)<div onMouseDown={handleResizeMouseDown('ref_title')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                             {visibleColumns.tra_qty && <th style={{ width: colWidthsRef.current.tra_qty, minWidth: colWidthsRef.current.tra_qty }} className="px-4 py-3 text-center bg-orange-50 relative group">Tra. Qty<div onMouseDown={handleResizeMouseDown('tra_qty')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                            {visibleColumns.quantity && <th style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center bg-orange-50 relative group">Quantity<div onMouseDown={handleResizeMouseDown('quantity')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.quantity && <th style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center bg-orange-50 relative group">DIH Quantity<div onMouseDown={handleResizeMouseDown('quantity')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                             {visibleColumns.available_qty && <th style={{ width: colWidthsRef.current.available_qty, minWidth: colWidthsRef.current.available_qty }} className="px-4 py-3 text-center bg-orange-50 text-[#5A5DF6] font-bold relative group">Available Qty<div onMouseDown={handleResizeMouseDown('available_qty')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                             {visibleColumns.fc_id && <th style={{ width: colWidthsRef.current.fc_id, minWidth: colWidthsRef.current.fc_id }} className="px-4 py-3 text-center bg-orange-50 relative group">FC ID<div onMouseDown={handleResizeMouseDown('fc_id')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                            {visibleColumns.sale_total && <th style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-Total<div onMouseDown={handleResizeMouseDown('sale_total')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                            {visibleColumns.sale_wh && <th style={{ width: colWidthsRef.current.sale_wh, minWidth: colWidthsRef.current.sale_wh }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-WH<div onMouseDown={handleResizeMouseDown('sale_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {/* {visibleColumns.sale_total && <th style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-Total<div onMouseDown={handleResizeMouseDown('sale_total')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>} */}
+                                            {visibleColumns.sale_wh_avg && <th style={{ width: colWidthsRef.current.sale_wh_avg, minWidth: colWidthsRef.current.sale_wh_avg }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-WH(4 MOS AVG)<div onMouseDown={handleResizeMouseDown('sale_wh_avg')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.sale_wh && <th style={{ width: colWidthsRef.current.sale_wh, minWidth: colWidthsRef.current.sale_wh }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-WH-CUR<div onMouseDown={handleResizeMouseDown('sale_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                             {visibleColumns.ship_wh && <th style={{ width: colWidthsRef.current.ship_wh, minWidth: colWidthsRef.current.ship_wh }} className="px-4 py-3 text-center bg-orange-50 relative group">Ship - WH<div onMouseDown={handleResizeMouseDown('ship_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                             {visibleColumns.sum_val && <th style={{ width: colWidthsRef.current.sum_val, minWidth: colWidthsRef.current.sum_val }} className="px-4 py-3 text-center bg-orange-50 relative group">Sum<div onMouseDown={handleResizeMouseDown('sum_val')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                            {visibleColumns.final_wh && <th style={{ width: colWidthsRef.current.final_wh, minWidth: colWidthsRef.current.final_wh }} className="px-4 py-3 text-center bg-orange-50 font-bold text-[#E74C3C] relative group">Final - WH<div onMouseDown={handleResizeMouseDown('final_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.final_wh && <th style={{ width: colWidthsRef.current.final_wh, minWidth: colWidthsRef.current.final_wh }} className={`px-4 py-3 text-center font-bold relative group ${!useSuggestedWh ? 'bg-[#22B573]/20 text-[#1e9d64]' : 'bg-orange-50 text-[#E74C3C] opacity-60'}`}>Final-WH-CUR {!useSuggestedWh && <span className="text-[9px] bg-[#22B573] text-white px-1.5 py-0.5 rounded ml-1">ACTIVE</span>}<div onMouseDown={handleResizeMouseDown('final_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30" /></th>}
+                                            {visibleColumns.suggest_final_wh && <th style={{ width: colWidthsRef.current.suggest_final_wh, minWidth: colWidthsRef.current.suggest_final_wh }} className={`px-4 py-3 text-center font-bold relative group ${useSuggestedWh ? 'bg-[#22B573]/20 text-[#1e9d64]' : 'bg-orange-50 text-[#5A5DF6] opacity-60'}`}>Sugg Final-WH {useSuggestedWh && <span className="text-[9px] bg-[#22B573] text-white px-1.5 py-0.5 rounded ml-1">ACTIVE</span>}<div onMouseDown={handleResizeMouseDown('suggest_final_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] active:bg-[#5A5DF6] z-30" /></th>}
                                         </>
                                     )}
                                 </tr>
@@ -766,11 +920,26 @@ const Calculation = () => {
                                         <tr key={row.id} className={`group hover:bg-[#F4F5F7]/80 transition-colors text-[#1C2340]/80 ${typeof activeText !== 'undefined' ? activeText : 'text-xs'}`}>
 
                                             {/* Action Column Cell */}
-                                            <td className="w-16 px-2 py-3 text-center bg-white border-r-2 border-[#D9DDE5]">
-                                                <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <button onClick={() => startEditing(row)} title="Edit SKU" className="p-1 text-[#5A5DF6] hover:bg-[#5A5DF6]/10 rounded transition-colors"><Pencil size={13} /></button>
-                                                    <button onClick={() => handleDeleteRow(row.id)} title="Delete Row" className="p-1 text-[#E74C3C] hover:bg-[#E74C3C]/10 rounded transition-colors"><Trash2 size={13} /></button>
+                                            <td className="w-16 px-2 py-3 text-center bg-white border-r-2 border-[#D9DDE5] relative">
+                                                <div className="flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        onClick={() => setOpenMenuRowId(openMenuRowId === row.id ? null : row.id)}
+                                                        className="p-1 text-[#1C2340]/60 hover:text-[#1C2340] hover:bg-gray-100 rounded transition-colors"
+                                                    >
+                                                        <MoreVertical size={16} />
+                                                    </button>
                                                 </div>
+
+                                                {openMenuRowId === row.id && (
+                                                    <div className="absolute left-10 top-2 z-50 bg-white border border-[#D9DDE5] rounded shadow-lg py-1 w-24">
+                                                        <button
+                                                            onClick={() => startEditing(row)}
+                                                            className="w-full text-left px-3 py-1.5 text-xs text-[#1C2340] hover:bg-gray-100 flex items-center gap-2"
+                                                        >
+                                                            <Pencil size={12} className="text-[#5A5DF6]" /> Edit
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </td>
 
                                             {/* 1. Product Cells */}
@@ -801,14 +970,14 @@ const Calculation = () => {
                                                 <td className="bg-purple-50/20 border-r border-[#D9DDE5]/40"></td>
                                             ) : (
                                                 <>
-                                                    {visibleColumns.sky_blue && <td style={{ width: colWidthsRef.current.sky_blue, minWidth: colWidthsRef.current.sky_blue }} className="px-3 py-3 text-center border-l border-[#D9DDE5]/30">{row.apr_sky_blue ? <span className="font-bold text-[#38BDF8] bg-[#38BDF8]/10 px-2 py-0.5 rounded-[3px]">{row.apr_sky_blue}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
-                                                    {visibleColumns.dark_blue && <td style={{ width: colWidthsRef.current.dark_blue, minWidth: colWidthsRef.current.dark_blue }} className="px-3 py-3 text-center">{row.apr_dark_blue ? <span className="font-bold text-[#1E40AF] bg-[#1E40AF]/10 px-2 py-0.5 rounded-[3px]">{row.apr_dark_blue}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
-                                                    {visibleColumns.brown && <td style={{ width: colWidthsRef.current.brown, minWidth: colWidthsRef.current.brown }} className="px-3 py-3 text-center">{row.apr_brown ? <span className="font-bold text-[#92400E] bg-[#92400E]/10 px-2 py-0.5 rounded-[3px]">{row.apr_brown}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
-                                                    {visibleColumns.green && <td style={{ width: colWidthsRef.current.green, minWidth: colWidthsRef.current.green }} className="px-3 py-3 text-center">{row.apr_green ? <span className="font-bold text-[#22B573] bg-[#22B573]/10 px-2 py-0.5 rounded-[3px]">{row.apr_green}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
-                                                    {visibleColumns.tan && <td style={{ width: colWidthsRef.current.tan, minWidth: colWidthsRef.current.tan }} className="px-3 py-3 text-center">{row.apr_tan ? <span className="font-bold text-[#D2B48C] bg-[#D2B48C]/10 px-2 py-0.5 rounded-[3px]">{row.apr_tan}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
-                                                    {visibleColumns.black && <td style={{ width: colWidthsRef.current.black, minWidth: colWidthsRef.current.black }} className="px-3 py-3 text-center">{row.apr_black ? <span className="font-bold text-[#1C2340] bg-[#1C2340]/10 px-2 py-0.5 rounded-[3px]">{row.apr_black}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
-                                                    {visibleColumns.red && <td style={{ width: colWidthsRef.current.red, minWidth: colWidthsRef.current.red }} className="px-3 py-3 text-center">{row.apr_red ? <span className="font-bold text-[#E74C3C] bg-[#E74C3C]/10 px-2 py-0.5 rounded-[3px]">{row.apr_red}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
-                                                    {visibleColumns.grey && <td style={{ width: colWidthsRef.current.grey, minWidth: colWidthsRef.current.grey }} className="px-3 py-3 text-center">{row.apr_grey ? <span className="font-bold text-[#9CA3AF] bg-[#9CA3AF]/10 px-2 py-0.5 rounded-[3px]">{row.apr_grey}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.sky_blue && activeVariantCols.sky_blue && <td style={{ width: colWidthsRef.current.sky_blue, minWidth: colWidthsRef.current.sky_blue }} className="px-3 py-3 text-center border-l border-[#D9DDE5]/30">{row.apr_sky_blue ? <span className="font-bold text-[#38BDF8] bg-[#38BDF8]/10 px-2 py-0.5 rounded-[3px]">{row.apr_sky_blue}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.dark_blue && activeVariantCols.dark_blue && <td style={{ width: colWidthsRef.current.dark_blue, minWidth: colWidthsRef.current.dark_blue }} className="px-3 py-3 text-center">{row.apr_dark_blue ? <span className="font-bold text-[#1E40AF] bg-[#1E40AF]/10 px-2 py-0.5 rounded-[3px]">{row.apr_dark_blue}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.brown && activeVariantCols.brown && <td style={{ width: colWidthsRef.current.brown, minWidth: colWidthsRef.current.brown }} className="px-3 py-3 text-center">{row.apr_brown ? <span className="font-bold text-[#92400E] bg-[#92400E]/10 px-2 py-0.5 rounded-[3px]">{row.apr_brown}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.green && activeVariantCols.green && <td style={{ width: colWidthsRef.current.green, minWidth: colWidthsRef.current.green }} className="px-3 py-3 text-center">{row.apr_green ? <span className="font-bold text-[#22B573] bg-[#22B573]/10 px-2 py-0.5 rounded-[3px]">{row.apr_green}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.tan && activeVariantCols.tan && <td style={{ width: colWidthsRef.current.tan, minWidth: colWidthsRef.current.tan }} className="px-3 py-3 text-center">{row.apr_tan ? <span className="font-bold text-[#D2B48C] bg-[#D2B48C]/10 px-2 py-0.5 rounded-[3px]">{row.apr_tan}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.black && activeVariantCols.black && <td style={{ width: colWidthsRef.current.black, minWidth: colWidthsRef.current.black }} className="px-3 py-3 text-center">{row.apr_black ? <span className="font-bold text-[#1C2340] bg-[#1C2340]/10 px-2 py-0.5 rounded-[3px]">{row.apr_black}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.red && activeVariantCols.red && <td style={{ width: colWidthsRef.current.red, minWidth: colWidthsRef.current.red }} className="px-3 py-3 text-center">{row.apr_red ? <span className="font-bold text-[#E74C3C] bg-[#E74C3C]/10 px-2 py-0.5 rounded-[3px]">{row.apr_red}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
+                                                    {visibleColumns.grey && activeVariantCols.grey && <td style={{ width: colWidthsRef.current.grey, minWidth: colWidthsRef.current.grey }} className="px-3 py-3 text-center">{row.apr_grey ? <span className="font-bold text-[#9CA3AF] bg-[#9CA3AF]/10 px-2 py-0.5 rounded-[3px]">{row.apr_grey}</span> : <span className="text-[#1C2340]/30">-</span>}</td>}
                                                 </>
                                             ))}
 
@@ -836,13 +1005,51 @@ const Calculation = () => {
                                                     {visibleColumns.quantity && <td style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center">{row.quantity}</td>}
                                                     {visibleColumns.available_qty && <td style={{ width: colWidthsRef.current.available_qty, minWidth: colWidthsRef.current.available_qty }} className="px-4 py-3 text-center font-bold text-[#1C2340] bg-[#F4F5F7]/50">{row.available_qty}</td>}
                                                     {visibleColumns.fc_id && <td style={{ width: colWidthsRef.current.fc_id, minWidth: colWidthsRef.current.fc_id }} className="px-4 py-3 text-center"><span className="bg-[#D9DDE5]/40 px-2 py-0.5 rounded-[3px] text-[10px]">{row.fulfilment_id}</span></td>}
-                                                    {visibleColumns.sale_total && <td style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center">{row.sale_total}</td>}
+                                                    {/* {visibleColumns.sale_total && <td style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center">{row.sale_total}</td>} */}
+                                                    {visibleColumns.sale_wh_avg && <td style={{ width: colWidthsRef.current.sale_wh_avg, minWidth: colWidthsRef.current.sale_wh_avg }} className="px-4 py-3 text-center font-medium text-[#1C2340] bg-orange-50/20">{row.sale_wh_avg}</td>}
                                                     {visibleColumns.sale_wh && <td style={{ width: colWidthsRef.current.sale_wh, minWidth: colWidthsRef.current.sale_wh }} className="px-4 py-3 text-center">{row.sale_wh}</td>}
-                                                    {visibleColumns.ship_wh && <td style={{ width: colWidthsRef.current.ship_wh, minWidth: colWidthsRef.current.ship_wh }} className="px-4 py-3 text-center flex items-center justify-center gap-1">{liveShipWh < 0 ? <TrendingDown size={12} className="text-[#E74C3C]" /> : <TrendingUp size={12} className="text-[#22B573]" />}<span className={liveShipWh < 0 ? "text-[#E74C3C] font-semibold" : ""}>{liveShipWh}</span></td>}
+                                                    {visibleColumns.ship_wh && <td style={{ width: colWidthsRef.current.ship_wh, minWidth: colWidthsRef.current.ship_wh }} className="px-4 py-3 text-center">{liveShipWh}</td>}
                                                     {visibleColumns.sum_val && <td style={{ width: colWidthsRef.current.sum_val, minWidth: colWidthsRef.current.sum_val }} className="px-4 py-3 text-center">{row.sum_val}</td>}
-                                                    {visibleColumns.final_wh && <td style={{ width: colWidthsRef.current.final_wh, minWidth: colWidthsRef.current.final_wh }} className="px-4 py-3 text-center bg-orange-50/30">
+                                                    {visibleColumns.final_wh && <td style={{ width: colWidthsRef.current.final_wh, minWidth: colWidthsRef.current.final_wh }} className={`px-4 py-3 text-center ${!useSuggestedWh ? 'bg-[#22B573]/10' : 'bg-orange-50/30 opacity-60'}`}>
                                                         <input type="number" value={row.final_wh === "" ? "" : row.final_wh} onChange={(e) => { const val = e.target.value; setCalculationData(prev => prev.map(p => p.id === row.id ? { ...p, final_wh: val, is_manual_final_wh: 1 } : p)); handleItemAutoSave(row.id, val); }} onWheel={handleWheelBlur} className="w-14 text-center font-bold bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none transition-colors" style={{ color: row.is_manual_final_wh ? '#5A5DF6' : '#1C2340' }} />
                                                     </td>}
+                                                    {visibleColumns.suggest_final_wh && (
+                                                        <td 
+                                                            style={{ width: colWidthsRef.current.suggest_final_wh, minWidth: colWidthsRef.current.suggest_final_wh }} 
+                                                            className={`px-4 py-3 text-center font-bold ${useSuggestedWh ? 'bg-[#22B573]/10 text-[#1e9d64]' : 'bg-orange-50/30 text-[#5A5DF6] opacity-60'}`}
+                                                            onDoubleClick={() => setEditingSuggestWh(row.id)}
+                                                        >
+                                                            {editingSuggestWh === row.id ? (
+                                                                <input 
+                                                                    type="number" 
+                                                                    autoFocus
+                                                                    value={row.suggest_final_wh === "" ? "" : row.suggest_final_wh} 
+                                                                    onChange={(e) => { 
+                                                                        const val = e.target.value; 
+                                                                        setCalculationData(prev => prev.map(p => p.id === row.id ? { ...p, suggest_final_wh: val, is_manual_suggest_final_wh: 1 } : p)); 
+                                                                    }} 
+                                                                    onBlur={(e) => {
+                                                                        handleSuggestAutoSave(row.id, e.target.value);
+                                                                        setEditingSuggestWh(null);
+                                                                    }}
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') {
+                                                                            e.target.blur();
+                                                                        }
+                                                                    }}
+                                                                    onWheel={handleWheelBlur} 
+                                                                    className="w-16 text-center font-bold bg-transparent border-b border-[#5A5DF6] outline-none text-[#5A5DF6]" 
+                                                                />
+                                                            ) : (
+                                                                <span 
+                                                                    className={`cursor-pointer ${row.is_manual_suggest_final_wh ? 'underline decoration-dashed underline-offset-4' : ''}`}
+                                                                    title={row.is_manual_suggest_final_wh ? "Manually edited. Double-click to edit again." : "Double-click to edit manually."}
+                                                                >
+                                                                    {row.suggest_final_wh}
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                    )}
                                                 </>
                                             ))}
                                         </tr>
@@ -857,15 +1064,29 @@ const Calculation = () => {
             {/* Modals Code from previous version remains exactly the same below... */}
             {isUploadModalOpen && (
                 <div className="fixed inset-0 z-50 bg-[#1C2340]/50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-[8px] shadow-xl w-full max-w-md overflow-hidden">
-                        <div className="px-6 py-4 border-b border-[#D9DDE5] flex items-center justify-between">
+                    <div className="bg-white rounded-[8px] shadow-xl w-full max-w-md overflow-visible">
+                        <div className="px-6 py-4 border-b border-[#D9DDE5] flex items-center justify-between rounded-t-[8px]">
                             <h3 className="font-bold text-[#1C2340]">Upload Calculation Report</h3>
                             <button onClick={() => setIsUploadModalOpen(false)} className="text-gray-400 hover:text-red-500"><X size={18} /></button>
                         </div>
                         <form onSubmit={handleFileUpload} className="p-6 space-y-5">
+                            {/* Marketplace Dropdown */}
+                            <div className="z-50 relative">
+                                <MarketplaceDropdown
+                                    selectedId={selectedMarketplaceId}
+                                    onChange={setSelectedMarketplaceId}
+                                />
+                            </div>
+
                             <div
-                                className="border-2 border-dashed border-[#D9DDE5] rounded-[5px] bg-[#F4F5F7]/30 hover:bg-[#F4F5F7]/80 p-8 flex flex-col items-center justify-center cursor-pointer transition-colors"
-                                onClick={() => fileInputRef.current.click()}
+                                className={`border-2 border-dashed border-[#D9DDE5] rounded-[5px] bg-[#F4F5F7]/30 p-8 flex flex-col items-center justify-center transition-colors ${!selectedMarketplaceId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#F4F5F7]/80 cursor-pointer'}`}
+                                onClick={() => {
+                                    if (!selectedMarketplaceId) {
+                                        alert("Please select a marketplace first!");
+                                        return;
+                                    }
+                                    fileInputRef.current.click();
+                                }}
                             >
                                 <input type="file" accept=".csv, .xlsx" className="hidden" ref={fileInputRef} onChange={(e) => setSelectedFile(e.target.files[0])} />
                                 <div className="w-12 h-12 rounded-full bg-[#5A5DF6]/10 flex items-center justify-center mb-3"><UploadCloud size={24} className="text-[#5A5DF6]" /></div>
@@ -878,7 +1099,7 @@ const Calculation = () => {
                                     <p className="text-xs text-[#1C2340]/50 text-center">Click to browse CSV or Excel</p>
                                 )}
                             </div>
-                            <button type="submit" disabled={isLoading || !selectedFile} className="w-full bg-[#5A5DF6] text-white py-2.5 rounded-[5px] text-sm font-bold flex justify-center items-center gap-2 hover:bg-[#494ce0] disabled:opacity-70">
+                            <button type="submit" disabled={isLoading || !selectedFile || !selectedMarketplaceId} className="w-full bg-[#5A5DF6] text-white py-2.5 rounded-[5px] text-sm font-bold flex justify-center items-center gap-2 hover:bg-[#494ce0] disabled:opacity-70">
                                 {isLoading ? <><Loader2 size={16} className="animate-spin" /> Uploading...</> : "Upload & Process"}
                             </button>
                         </form>
@@ -1001,6 +1222,33 @@ const Calculation = () => {
                                             <input type="number" step="0.01" name="weight" value={editFormData.weight || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
                                         </div>
                                     </div>
+
+                                    {/* Action row: Toggle & Delete */}
+                                    <div className="flex items-center gap-8 mt-6 pt-5 border-t border-gray-100">
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                type="button"
+                                                onClick={() => setEditFormData({ ...editFormData, isActive: editFormData.isActive ? 0 : 1 })}
+                                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${editFormData.isActive ? 'bg-[#22B573]' : 'bg-gray-300'}`}
+                                            >
+                                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${editFormData.isActive ? 'translate-x-6' : 'translate-x-1'}`} />
+                                            </button>
+                                            <span className={`text-sm font-bold ${editFormData.isActive ? 'text-[#22B573]' : 'text-gray-500'}`}>
+                                                {editFormData.isActive ? 'Active' : 'Inactive'}
+                                            </span>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                const isDeleted = await handleDeleteRow(editFormData.id);
+                                                if (isDeleted) setIsEditModalOpen(false);
+                                            }}
+                                            className="text-[#E74C3C] hover:text-white hover:bg-[#E74C3C] transition-colors flex items-center gap-2 text-xs font-bold py-1.5 px-3 rounded border border-[#E74C3C]"
+                                        >
+                                            <Trash2 size={14} /> Delete SKU
+                                        </button>
+                                    </div>
                                 </div>
                             </form>
                         </div>
@@ -1030,7 +1278,7 @@ const Calculation = () => {
                         <div className="p-5 overflow-y-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 bg-white">
                             <div>
                                 <label className="flex items-center gap-2 mb-3 pb-1 border-b border-[#D9DDE5]/50 cursor-pointer group">
-                                    <input type="checkbox" checked={productSpan === colGroupsConfig.product.length} onChange={(e) => handleGroupToggle('product', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                    <input type="checkbox" checked={colGroupsConfig.product.every(k => visibleColumns[k])} onChange={(e) => handleGroupToggle('product', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
                                     <span className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider group-hover:text-[#5A5DF6] transition-colors">Product</span>
                                 </label>
                                 <div className="space-y-2.5">
@@ -1044,7 +1292,7 @@ const Calculation = () => {
                             </div>
                             <div>
                                 <label className="flex items-center gap-2 mb-3 pb-1 border-b border-[#D9DDE5]/50 cursor-pointer group">
-                                    <input type="checkbox" checked={initWHSpan === colGroupsConfig.initialWH.length} onChange={(e) => handleGroupToggle('initialWH', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                    <input type="checkbox" checked={colGroupsConfig.initialWH.every(k => visibleColumns[k])} onChange={(e) => handleGroupToggle('initialWH', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
                                     <span className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider group-hover:text-[#5A5DF6] transition-colors">Initial WH</span>
                                 </label>
                                 <div className="space-y-2.5">
@@ -1058,7 +1306,7 @@ const Calculation = () => {
                             </div>
                             <div>
                                 <label className="flex items-center gap-2 mb-3 pb-1 border-b border-[#D9DDE5]/50 cursor-pointer group">
-                                    <input type="checkbox" checked={variantsSpan === colGroupsConfig.variants.length} onChange={(e) => handleGroupToggle('variants', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                    <input type="checkbox" checked={colGroupsConfig.variants.every(k => visibleColumns[k])} onChange={(e) => handleGroupToggle('variants', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
                                     <span className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider group-hover:text-[#5A5DF6] transition-colors">Variants</span>
                                 </label>
                                 <div className="space-y-2.5">
@@ -1072,7 +1320,7 @@ const Calculation = () => {
                             </div>
                             <div>
                                 <label className="flex items-center gap-2 mb-3 pb-1 border-b border-[#D9DDE5]/50 cursor-pointer group">
-                                    <input type="checkbox" checked={specsSpan === colGroupsConfig.specs.length} onChange={(e) => handleGroupToggle('specs', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                    <input type="checkbox" checked={colGroupsConfig.specs.every(k => visibleColumns[k])} onChange={(e) => handleGroupToggle('specs', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
                                     <span className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider group-hover:text-[#5A5DF6] transition-colors">Specs & Fin</span>
                                 </label>
                                 <div className="space-y-2.5">
@@ -1086,11 +1334,11 @@ const Calculation = () => {
                             </div>
                             <div>
                                 <label className="flex items-center gap-2 mb-3 pb-1 border-b border-[#D9DDE5]/50 cursor-pointer group">
-                                    <input type="checkbox" checked={logisticsSpan === colGroupsConfig.logistics.length} onChange={(e) => handleGroupToggle('logistics', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
+                                    <input type="checkbox" checked={colGroupsConfig.logistics.every(k => visibleColumns[k])} onChange={(e) => handleGroupToggle('logistics', e.target.checked)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
                                     <span className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider group-hover:text-[#5A5DF6] transition-colors">Logistics</span>
                                 </label>
                                 <div className="space-y-2.5">
-                                    {[['ref_sku', 'SKU (Ref)'], ['ref_title', 'Title (Ref)'], ['tra_qty', 'Tra. Qty'], ['quantity', 'Quantity'], ['available_qty', 'Available Qty'], ['fc_id', 'FC ID'], ['sale_total', 'Sale-Total'], ['sale_wh', 'Sale-WH'], ['ship_wh', 'Ship-WH'], ['sum_val', 'Sum'], ['final_wh', 'Final-WH']].map(([k, l]) => (
+                                    {[['ref_sku', 'SKU (Ref)'], ['ref_title', 'Title (Ref)'], ['tra_qty', 'Tra. Qty'], ['quantity', 'Quantity'], ['available_qty', 'Available Qty'], ['fc_id', 'FC ID'], /*['sale_total', 'Sale-Total'],*/['sale_wh', 'Sale-WH'], ['ship_wh', 'Ship-WH'], ['sum_val', 'Sum'], ['final_wh', 'Final-WH']].map(([k, l]) => (
                                         <label key={k} className="flex items-center gap-2 cursor-pointer group">
                                             <input type="checkbox" checked={visibleColumns[k]} onChange={() => handleColumnToggle(k)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
                                             <span className="text-[11px] font-medium text-[#1C2340]/80 group-hover:text-[#5A5DF6] transition-colors">{l}</span>

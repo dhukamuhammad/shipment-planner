@@ -1,11 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, FileText, CheckCircle2, Clock, AlertCircle, Trash2, FileSpreadsheet, Lock } from 'lucide-react';
+import { UploadCloud, FileText, CheckCircle2, Clock, AlertCircle, Trash2, FileSpreadsheet, Lock, RefreshCw } from 'lucide-react';
 import api from '../../services/api';
+import MarketplaceDropdown from '../../components/MarketplaceDropdown';
 
 const Upload = () => {
-    const [reportType, setReportType] = useState('AFS Report');
     const [file, setFile] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
+
+    // Marketplace state
+    const [selectedMarketplaceId, setSelectedMarketplaceId] = useState("");
+    const [selectedMarketplaceName, setSelectedMarketplaceName] = useState("");
 
     // Naya state DB data ke liye
     const [recentReports, setRecentReports] = useState([]);
@@ -68,25 +72,20 @@ const Upload = () => {
 
     const handleUploadClick = async () => {
         if (!file) return alert("Pehle ek file select karein!");
-
-        let endpoint = "";
-        if (reportType === 'AFS Report') endpoint = "/afs";
-        else if (reportType === 'Business Report') endpoint = "/business";
-        else if (reportType === 'DIH Report') endpoint = "/dih";
-        else if (reportType === 'Transit Shipment') endpoint = "/transit";
-        else return alert("Invalid report type!");
+        if (!selectedMarketplaceId) return alert("Please select a marketplace first!");
 
         setIsUploading(true);
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("marketplace_id", selectedMarketplaceId);
 
         try {
-            const response = await api.post(endpoint, formData, {
+            const response = await api.post("/auto", formData, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
 
             if (response.status === 201 || response.status === 200) {
-                alert(`${reportType} uploaded and saved successfully!`);
+                alert(`Report uploaded and saved successfully!`);
                 setFile(null);
 
                 // 🔥 UPLOAD HOTE HI LIST REFRESH KARO 🔥
@@ -179,42 +178,35 @@ const Upload = () => {
                 {/* Upload Section (Left Side) */}
                 <div className="lg:col-span-2 bg-white border border-[#D9DDE5] rounded-[5px] p-6 flex flex-col justify-between h-[450px]">
                     <div>
-                        <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                            <h2 className="text-sm font-bold text-[#1C2340]">Select Report Type</h2>
-
-                            {/* Report Type Selector (With Super Smooth Sliding Car Animation) */}
-                            <div className="relative flex bg-[#F4F5F7] border border-[#D9DDE5] rounded-[4px] p-1 w-full sm:w-auto items-center isolation-auto">
-
-                                {/* 🚗 Smooth Sliding Indicator Behind Tabs */}
-                                <div
-                                    className="absolute top-1 bottom-1 left-1 rounded-[3px] bg-white shadow-md border border-[#D9DDE5]/50 transition-all duration-500 cubic-bezier(0.25, 1, 0.5, 1)"
-                                    style={{
-                                        width: 'calc(25% - 2px)',
-                                        transform: `translateX(${reportType === 'AFS Report' ? '0%' :
-                                            reportType === 'Business Report' ? '100%' :
-                                                reportType === 'DIH Report' ? '200%' : '300%'
-                                            })`
-                                    }}
+                        {/* Marketplace Dropdown */}
+                        <div className="mb-4 flex items-end gap-4">
+                            <div className="flex-1">
+                                <MarketplaceDropdown 
+                                    selectedId={selectedMarketplaceId} 
+                                    onChange={(id, name) => {
+                                        setSelectedMarketplaceId(id);
+                                        setSelectedMarketplaceName(name || "");
+                                    }} 
                                 />
-
-                                {['AFS Report', 'Business Report', 'DIH Report', 'Transit Shipment'].map((type) => (
-                                    <button
-                                        key={type}
-                                        onClick={() => setReportType(type)}
-                                        className={`relative z-10 flex-1 sm:flex-none w-[80px] py-1.5 text-xs font-bold rounded-[3px] text-center
-                                        transition-colors duration-300 ease-in-out transform active:scale-95 origin-center
-                                        ${reportType === type ? 'text-[#5A5DF6]' : 'text-[#1C2340]/50 hover:text-[#1C2340]'}`}
-                                    >
-                                        {type.split(' ')[0]}
-                                    </button>
-                                ))}
                             </div>
+                            {selectedMarketplaceName.toLowerCase() === "amazon" && (
+                                <button className="bg-[#5A5DF6] hover:bg-[#494ce0] text-white px-4 py-[7px] rounded-[4px] text-xs font-bold flex items-center gap-2 mb-[2px] transition-colors shadow-sm whitespace-nowrap">
+                                    <RefreshCw size={14} />
+                                    Synchronize
+                                </button>
+                            )}
                         </div>
 
                         {/* Drag & Drop Zone */}
                         <div
-                            className="border-2 border-dashed border-[#D9DDE5] rounded-[5px] bg-[#F4F5F7]/30 hover:bg-[#F4F5F7]/80 transition-colors p-8 flex flex-col items-center justify-center cursor-pointer h-[280px]"
-                            onClick={() => fileInputRef.current.click()}
+                            className={`border-2 border-dashed border-[#D9DDE5] rounded-[5px] bg-[#F4F5F7]/30 transition-colors p-6 flex flex-col items-center justify-center h-full ${!selectedMarketplaceId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#F4F5F7]/80 cursor-pointer'}`}
+                            onClick={() => {
+                                if (!selectedMarketplaceId) {
+                                    alert("Please select a marketplace first!");
+                                    return;
+                                }
+                                fileInputRef.current.click();
+                            }}
                         >
                             {/* Hidden file input */}
                             <input
@@ -228,7 +220,7 @@ const Upload = () => {
                                 <UploadCloud size={24} className="text-[#5A5DF6]" />
                             </div>
                             <h3 className="text-sm font-bold text-[#1C2340] mb-1">
-                                Upload {reportType}
+                                Upload Report
                             </h3>
 
                             {file ? (
@@ -246,6 +238,10 @@ const Upload = () => {
                                 className={`${isUploading ? 'bg-[#D9DDE5] text-[#1C2340]/50 cursor-not-allowed' : 'bg-[#5A5DF6] hover:bg-[#494ce0] text-white'} px-5 py-2 text-xs font-semibold rounded-[4px] transition-colors shadow-sm`}
                                 onClick={(e) => {
                                     e.stopPropagation();
+                                    if (!selectedMarketplaceId) {
+                                        alert("Please select a marketplace first!");
+                                        return;
+                                    }
                                     if (file) handleUploadClick();
                                     else fileInputRef.current.click();
                                 }}
@@ -308,6 +304,11 @@ const Upload = () => {
                                                                     <span className="text-[9px] font-semibold text-[#1C2340]/60 bg-[#D9DDE5]/40 px-1.5 py-0.5 rounded-[3px]">
                                                                         {report.report_type}
                                                                     </span>
+                                                                    {report.marketplace && (
+                                                                        <span className="text-[9px] font-bold text-[#5A5DF6] bg-[#5A5DF6]/10 px-1.5 py-0.5 rounded-[3px]">
+                                                                            {report.marketplace}
+                                                                        </span>
+                                                                    )}
                                                                     <span className="text-[10px] text-[#1C2340]/40">{report.file_size}</span>
                                                                 </div>
                                                                 <div className="flex items-center gap-1 mt-1.5">
@@ -359,6 +360,11 @@ const Upload = () => {
                                                                     <span className="text-[9px] font-bold text-[#E74C3C] bg-[#E74C3C]/10 px-1.5 py-0.5 rounded-[3px]">
                                                                         {report.report_type}
                                                                     </span>
+                                                                    {report.marketplace && (
+                                                                        <span className="text-[9px] font-bold text-[#5A5DF6] bg-[#5A5DF6]/10 px-1.5 py-0.5 rounded-[3px]">
+                                                                            {report.marketplace}
+                                                                        </span>
+                                                                    )}
                                                                     <span className="text-[10px] text-[#1C2340]/40">{report.file_size}</span>
                                                                 </div>
                                                                 <div className="flex items-center gap-1 mt-1.5">
@@ -411,6 +417,7 @@ const Upload = () => {
                                                         <thead className="bg-[#F4F5F7] sticky top-0 z-10 shadow-sm">
                                                             <tr>
                                                                 <th className="px-4 py-3 text-xs font-bold text-[#1C2340]/70 uppercase">File Name</th>
+                                                                <th className="px-4 py-3 text-xs font-bold text-[#1C2340]/70 uppercase">Marketplace</th>
                                                                 <th className="px-4 py-3 text-xs font-bold text-[#1C2340]/70 uppercase">Report Type</th>
                                                                 <th className="px-4 py-3 text-xs font-bold text-[#1C2340]/70 uppercase">Size</th>
                                                                 <th className="px-4 py-3 text-xs font-bold text-[#1C2340]/70 uppercase">Date & Time</th>
@@ -430,6 +437,15 @@ const Upload = () => {
                                                                         <td className="px-4 py-3 flex items-center gap-3">
                                                                             <FileSpreadsheet size={16} style={{ color }} />
                                                                             <span className="text-sm font-semibold text-[#1C2340]">{report.file_name}</span>
+                                                                        </td>
+                                                                        <td className="px-4 py-3">
+                                                                            {report.marketplace ? (
+                                                                                <span className="text-[10px] font-bold px-2 py-1 rounded-[3px] bg-[#5A5DF6]/10 text-[#5A5DF6]">
+                                                                                    {report.marketplace}
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span className="text-[10px] text-[#1C2340]/40">-</span>
+                                                                            )}
                                                                         </td>
                                                                         <td className="px-4 py-3">
                                                                             <span className={`text-[10px] font-bold px-2 py-1 rounded-[3px] ${isProtected ? 'bg-[#E74C3C]/10 text-[#E74C3C]' : 'bg-[#D9DDE5]/40 text-[#1C2340]/60'}`}>

@@ -43,17 +43,19 @@ const uploadCalculationReport = async (req, res) => {
         const fileSizeMB = (req.file.size / (1024 * 1024)).toFixed(2) + " MB";
         const fileExt = path.extname(req.file.originalname).toLowerCase();
 
+        const marketplace_id = req.body.marketplace_id || null;
+
         // 1. Create entry in uploaded_reports (For history tracking)
         const [reportResult] = await connection.query(
-            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status) VALUES (?, 'Calculation', ?, 'Processing')`,
-            [req.file.filename, fileSizeMB]
+            `INSERT INTO uploaded_reports (file_name, report_type, file_size, status, marketplace_id) VALUES (?, 'Calculation', ?, 'Processing', ?)`,
+            [req.file.filename, fileSizeMB, marketplace_id]
         );
         reportId = reportResult.insertId;
 
         // 2. Create Master entry for Top Cards
         const [masterResult] = await connection.query(
-            `INSERT INTO shipment_calculations_master (report_id, status) VALUES (?, 'Draft')`,
-            [reportId] // <--- Yahan reportId pass kiya
+            `INSERT INTO shipment_calculations_master (report_id, status, marketplace_id) VALUES (?, 'Draft', ?)`,
+            [reportId, marketplace_id] // <--- Yahan reportId pass kiya
         );
         const planId = masterResult.insertId;
 
@@ -162,6 +164,7 @@ const uploadCalculationReport = async (req, res) => {
             bulkValues.push([
                 planId,
                 reportId,
+                marketplace_id,
                 row["Group Name"] || 'Unknown',
                 row["SKU"],
                 row["Title"] || null,
@@ -213,7 +216,7 @@ const uploadCalculationReport = async (req, res) => {
         // Bulk Insert 119+ rows
         const insertQuery = `
             INSERT INTO shipment_calculation_items (
-                plan_id, report_id, group_name, sku, title, category, 
+                plan_id, report_id, marketplace_id, group_name, sku, title, category, 
                 int_wh, dec_wh, non_apron_qty, 
                 apr_sky_blue, apr_dark_blue, apr_brown, apr_green, apr_tan, apr_black, apr_red, apr_grey, 
                 weight, total_weight, hsn, gst, cost, 
@@ -294,19 +297,18 @@ const addManualCalculationRow = async (req, res) => {
 };
 
 // =======================================================
-// 7. EDIT CALCULATION ROW (With Weight)
+// 7. EDIT CALCULATION ROW (With Weight & Active Status)
 // =======================================================
 const editCalculationRow = async (req, res) => {
     try {
-        // 🔥 weight destructure kiya
-        const { itemId, groupName, sku, title, category, hsn, gst, cost, weight } = req.body;
+        const { itemId, groupName, sku, title, category, hsn, gst, cost, weight, isActive } = req.body;
         const connection = await db.getConnection();
 
         await connection.query(
             `UPDATE shipment_calculation_items 
-             SET group_name=?, sku=?, title=?, category=?, hsn=?, gst=?, cost=?, weight=?, ref_sku=?, ref_title=?
+             SET group_name=?, sku=?, title=?, category=?, hsn=?, gst=?, cost=?, weight=?, is_active=?, ref_sku=?, ref_title=?
              WHERE id=?`,
-            [groupName, sku, title, category, hsn, gst, cost, weight, sku, title, itemId] // 🔥 weight variable map kiya
+            [groupName, sku, title, category, hsn, gst, cost, weight, isActive !== undefined ? isActive : 1, sku, title, itemId] 
         );
         connection.release();
         return successResponse(res, "Row updated successfully!", null, 200);
@@ -341,12 +343,21 @@ const deleteCalculationRow = async (req, res) => {
 const getCalculationData = async (req, res) => {
     let connection;
     try {
+        const { marketplace_id } = req.query;
         connection = await db.getConnection();
 
-        // Sabse recent master plan (top cards data) nikal rahe hain
-        const [masterRows] = await connection.query(
-            `SELECT * FROM shipment_calculations_master ORDER BY created_at DESC LIMIT 1`
-        );
+        // Sabse recent master plan (top cards data) nikal rahe hain, with optional marketplace filter
+        let masterQuery = `SELECT * FROM shipment_calculations_master`;
+        let masterParams = [];
+        
+        if (marketplace_id) {
+            masterQuery += ` WHERE marketplace_id = ?`;
+            masterParams.push(marketplace_id);
+        }
+        
+        masterQuery += ` ORDER BY created_at DESC LIMIT 1`;
+
+        const [masterRows] = await connection.query(masterQuery, masterParams);
 
         if (masterRows.length === 0) {
             connection.release();
@@ -355,16 +366,48 @@ const getCalculationData = async (req, res) => {
 
         const masterData = masterRows[0];
 
+        let calculatedAfsDays = masterData.afs_days; // Default fallback
+
         // Master ID ke basis par saari SKUs (rows) nikal rahe hain
         const [itemRows] = await connection.query(
             `SELECT * FROM shipment_calculation_items WHERE plan_id = ?`,
             [masterData.id]
         );
 
-        // Transit Shipment report se SKU-wise total quantity nikal rahe hain (Tra. Qty ke liye)
-        const [transitRows] = await connection.query(
-            `SELECT merchant_sku, SUM(quantity) as total_qty FROM transit_shipment_data GROUP BY merchant_sku`
-        );
+        // --- SMART DATE MATCHING FOR TRANSIT SHIPMENT ---
+        const [latestOtherReports] = await connection.query(`
+            SELECT MAX(uploaded_at) as latest_other_time
+            FROM uploaded_reports
+            WHERE report_type IN ('AFS', 'Business', 'DIH') AND status = 'Success'
+        `);
+        
+        const [latestTransitReport] = await connection.query(`
+            SELECT id, uploaded_at FROM uploaded_reports WHERE report_type = 'Transit Shipment' AND status = 'Success' ORDER BY uploaded_at DESC LIMIT 1
+        `);
+
+        let latestTransitId = null;
+        if (latestTransitReport.length > 0) {
+            if (latestOtherReports.length > 0 && latestOtherReports[0].latest_other_time) {
+                const otherTime = new Date(latestOtherReports[0].latest_other_time).getTime();
+                const transitTime = new Date(latestTransitReport[0].uploaded_at).getTime();
+                const hoursDiff = Math.abs(otherTime - transitTime) / (1000 * 60 * 60);
+                // 12 hours window
+                if (hoursDiff <= 12) {
+                    latestTransitId = latestTransitReport[0].id;
+                }
+            } else {
+                 latestTransitId = latestTransitReport[0].id; // Fallback if no other reports exist
+            }
+        }
+
+        let transitRows = [];
+        if (latestTransitId) {
+            [transitRows] = await connection.query(
+                `SELECT merchant_sku, SUM(quantity) as total_qty FROM transit_shipment_data WHERE report_id = ? GROUP BY merchant_sku`,
+                [latestTransitId]
+            );
+        }
+
         const transitQtyMap = {};
         transitRows.forEach((r) => {
             transitQtyMap[r.merchant_sku] = r.total_qty;
@@ -388,29 +431,74 @@ const getCalculationData = async (req, res) => {
             businessQtyMap[r.sku] = r.total_units_ordered;
         });
 
-        // AFS report se SKU-wise total Shipped Quantity nikal rahe hain (Sale-WH ke liye)
-        const [afsRows] = await connection.query(
-            `SELECT merchant_sku, SUM(shipped_quantity) as total_shipped_qty FROM afs_data GROUP BY merchant_sku`
+        // --- Naya AFS Logic: Current Month aur 4-Month Avg ke liye ---
+        
+        // 1. Sabse pehle latest AFS report nikalte hain (Current Month 'Sale-WH' ke liye)
+        const [latestAfsReport] = await connection.query(`
+            SELECT report_id as id, MAX(shipment_date) as max_date 
+            FROM afs_data 
+            WHERE shipment_date IS NOT NULL AND shipment_date != ''
+            GROUP BY report_id 
+            ORDER BY max_date DESC 
+            LIMIT 1
+        `);
+        
+        let afsCurrentQtyMap = {};
+        if (latestAfsReport.length > 0) {
+            const latestAfsId = latestAfsReport[0].id;
+
+            // --- NEW: Calculate afs_days dynamically from only the LATEST afs_data report ---
+            const [afsDates] = await connection.query(
+                `SELECT DATEDIFF(MAX(DATE(shipment_date)), MIN(DATE(shipment_date))) + 1 as total_days 
+                 FROM afs_data 
+                 WHERE shipment_date IS NOT NULL AND shipment_date != '' AND report_id = ?`,
+                [latestAfsId]
+            );
+
+            if (afsDates.length > 0 && afsDates[0].total_days) {
+                calculatedAfsDays = afsDates[0].total_days;
+            }
+
+            // Sirf latest report ka data (Current Sale-WH)
+            const [afsCurrentRows] = await connection.query(
+                `SELECT merchant_sku, SUM(shipped_quantity) as total_shipped_qty FROM afs_data WHERE report_id = ? GROUP BY merchant_sku`,
+                [latestAfsId]
+            );
+            afsCurrentRows.forEach((r) => {
+                afsCurrentQtyMap[r.merchant_sku] = r.total_shipped_qty;
+            });
+        }
+
+        // Override the database value so frontend receives the exact calculated days
+        masterData.afs_days = calculatedAfsDays;
+
+        // 2. 4-Month ka Total aur Count nikalte hain (Avg ke liye)
+        const [afsAvgRows] = await connection.query(
+            `SELECT merchant_sku, SUM(shipped_quantity) as total_qty, COUNT(DISTINCT report_id) as month_count 
+             FROM afs_data 
+             GROUP BY merchant_sku`
         );
-        const afsQtyMap = {};
-        afsRows.forEach((r) => {
-            afsQtyMap[r.merchant_sku] = r.total_shipped_qty;
+        const afsAvgQtyMap = {};
+        afsAvgRows.forEach((r) => {
+            const count = r.month_count > 0 ? r.month_count : 1;
+            afsAvgQtyMap[r.merchant_sku] = r.total_qty / count;
         });
 
         // Master ke afs_days aur shipment_plan_days nikal rahe hain (Ship-WH formula ke liye)
         const afsDays = Number(masterData.afs_days) || 0;
         const shipmentPlanDays = Number(masterData.shipment_plan_days) || 0;
 
-        // Har item ke tra_qty, quantity, sale_total, sale_wh, ship_wh ko calculate karke overwrite kar rahe hain
+        // Har item ke tra_qty, quantity, sale_total, sale_wh, sale_wh_avg, ship_wh ko calculate karke overwrite kar rahe hain
         const itemsWithTraQty = itemRows.map((item) => {
             const traQty = Number(transitQtyMap[item.sku]) || 0;
             const quantity = Number(dihQtyMap[item.sku]) || 0;
-            const saleWh = Number(afsQtyMap[item.sku]) || 0;
+            const saleWh = Number(afsCurrentQtyMap[item.sku]) || 0;
 
             // Available Qty = Tra. Qty + Quantity
             const availableQty = traQty + quantity;
 
             // Formula: Ship-WH = (Sale-WH / AFS Days * Shipment Plan Days) - Available Qty
+            // Note: User ke hisab se Ship-WH calculate karne mein hamesha current Sale-WH use hota hai, toh woh waisa hi rakhenge
             let shipWh = 0;
             if (afsDays > 0) {
                 shipWh = ((saleWh / afsDays) * shipmentPlanDays) - availableQty;
@@ -422,6 +510,7 @@ const getCalculationData = async (req, res) => {
                 quantity: quantity,
                 sale_total: businessQtyMap[item.sku] || 0,
                 sale_wh: saleWh,
+                sale_wh_avg: Math.round(afsAvgQtyMap[item.sku] || 0),
                 available_qty: availableQty,
                 ship_wh: Math.round(shipWh)
             };
@@ -496,6 +585,27 @@ const updateItemFinalWh = async (req, res) => {
 };
 
 // =======================================================
+// 5.5 UPDATE ITEM SUGGEST WH (MANUAL OVERRIDE)
+// =======================================================
+const updateItemSuggestWh = async (req, res) => {
+    try {
+        const { itemId, suggestWh } = req.body;
+        const connection = await db.getConnection();
+
+        // Value update karo aur flag ko 1 (true) kar do
+        await connection.query(
+            `UPDATE shipment_calculation_items SET suggest_final_wh = ?, is_manual_suggest_final_wh = 1 WHERE id = ?`,
+            [suggestWh, itemId]
+        );
+        connection.release();
+        return successResponse(res, "Suggest Final WH manually updated!", null, 200);
+    } catch (error) {
+        console.error("Manual Item Update Error:", error);
+        return errorResponse(res, "Failed to update Suggest Final WH", 500);
+    }
+};
+
+// =======================================================
 // 6. RESET ALL TO FORMULA
 // =======================================================
 const resetFinalWh = async (req, res) => {
@@ -505,7 +615,7 @@ const resetFinalWh = async (req, res) => {
 
         // Plan ki saari rows ka manual flag hata do (0 kar do)
         await connection.query(
-            `UPDATE shipment_calculation_items SET is_manual_final_wh = 0 WHERE plan_id = ?`,
+            `UPDATE shipment_calculation_items SET is_manual_final_wh = 0, is_manual_suggest_final_wh = 0 WHERE plan_id = ?`,
             [planId]
         );
         connection.release();
@@ -558,6 +668,7 @@ module.exports = {
     getCalculationData,
     updateMasterData,
     updateItemFinalWh,
+    updateItemSuggestWh,
     resetFinalWh,
     getManifestDetails
 };
