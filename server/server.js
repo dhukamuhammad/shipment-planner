@@ -9,6 +9,7 @@ const stockRoutes = require("./routes/stock/stock");
 const manifestRoutes = require("./routes/manifest/manifest");
 const marketplaceRoutes = require("./routes/marketplace/marketplace");
 const settingsRoutes = require("./routes/settings/settings");
+const eventsRoutes = require("./routes/settings/events");
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use("/api", stockRoutes);
 app.use("/api", manifestRoutes);
 app.use("/api", marketplaceRoutes);
 app.use("/api", settingsRoutes);
+app.use("/api/events", eventsRoutes);
 
 
 

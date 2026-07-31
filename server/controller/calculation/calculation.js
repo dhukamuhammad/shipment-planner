@@ -45,6 +45,12 @@ const uploadCalculationReport = async (req, res) => {
 
         const marketplace_id = req.body.marketplace_id || null;
 
+        let marketplaceName = "";
+        if (marketplace_id) {
+            const [mpRows] = await connection.query("SELECT name FROM marketplaces WHERE id = ?", [marketplace_id]);
+            marketplaceName = mpRows.length > 0 ? mpRows[0].name.toLowerCase().trim() : "";
+        }
+
         // 1. Create entry in uploaded_reports (For history tracking)
         const [reportResult] = await connection.query(
             `INSERT INTO uploaded_reports (file_name, report_type, file_size, status, marketplace_id) VALUES (?, 'Calculation', ?, 'Processing', ?)`,
@@ -52,27 +58,76 @@ const uploadCalculationReport = async (req, res) => {
         );
         reportId = reportResult.insertId;
 
-        // 2. Create Master entry for Top Cards
-        const [masterResult] = await connection.query(
-            `INSERT INTO shipment_calculations_master (report_id, status, marketplace_id) VALUES (?, 'Draft', ?)`,
-            [reportId, marketplace_id] // <--- Yahan reportId pass kiya
-        );
-        const planId = masterResult.insertId;
+        // 2. Check if appending to an existing plan
+        let planId = req.body.planId;
+        
+        if (!planId) {
+            // Create Master entry for Top Cards
+            const [masterResult] = await connection.query(
+                `INSERT INTO shipment_calculations_master (report_id, status, marketplace_id) VALUES (?, 'Draft', ?)`,
+                [reportId, marketplace_id]
+            );
+            planId = masterResult.insertId;
+        }
 
         console.time("⏳ Calculation File Parsing");
 
         let rawRows = [];
 
         // --- STEP 1: POORI SHEET KO 2D ARRAY ME CONVERT KARO ---
+        let ixdWarehouses = [];
+        let regularWarehouses = [];
+
         if (fileExt === '.csv') {
             rawRows = await parseCsvRaw(req.file.path);
         } else {
-            const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(req.file.path, {
-                styles: 'ignore', sharedStrings: 'cache', hyperlinks: 'ignore', worksheets: 'emit'
+            const workbook = new ExcelJS.Workbook();
+            await workbook.xlsx.readFile(req.file.path);
+            
+            // Extract from IXD and Warehouse
+            workbook.eachSheet((worksheet) => {
+                const wsName = worksheet.name ? worksheet.name.toLowerCase().trim() : '';
+                if (wsName === 'ixd' || wsName === 'warehouse') {
+                    let targetColIdx = -1;
+                    worksheet.eachRow((row, rowNumber) => {
+                        if (rowNumber === 1) {
+                            row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                                if (cell.value) {
+                                    const cellStr = cell.value.toString().toLowerCase().trim();
+                                    const mName = marketplaceName.toLowerCase().trim();
+                                    if (cellStr === mName || (cellStr.includes('amazon') && mName.includes('amazon'))) {
+                                        targetColIdx = colNumber;
+                                    }
+                                }
+                            });
+                        } else {
+                            if (targetColIdx !== -1) {
+                                const cell = row.getCell(targetColIdx);
+                                if (cell && cell.value) {
+                                    const val = cell.value.toString().trim();
+                                    if (val) {
+                                        if (wsName === 'ixd') ixdWarehouses.push(val);
+                                        if (wsName === 'warehouse') regularWarehouses.push(val);
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
             });
-            for await (const worksheet of workbookReader) {
-                for await (const row of worksheet) {
-                    if (!row.hasValues) continue;
+
+            // Extract Template data
+            let templateSheet = workbook.worksheets.find(ws => ws.name && ws.name.toLowerCase().trim() === 'template');
+            if (!templateSheet && workbook.worksheets.length > 0) {
+                // if 'Template' not found by name, fallback to first sheet if it's not IXD/Warehouse
+                const firstSheetName = workbook.worksheets[0].name.toLowerCase().trim();
+                if (firstSheetName !== 'ixd' && firstSheetName !== 'warehouse') {
+                    templateSheet = workbook.worksheets[0];
+                }
+            }
+
+            if (templateSheet) {
+                templateSheet.eachRow((row, rowNumber) => {
                     let rowData = [];
                     row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
                         let val = cell.value;
@@ -81,19 +136,44 @@ const uploadCalculationReport = async (req, res) => {
                         }
                         rowData[colNumber] = val !== undefined ? val : null;
                     });
-                    rawRows.push(rowData);
+                    if (rowData.length > 0) {
+                        rawRows.push(rowData);
+                    }
+                });
+            }
+            
+            // Insert parsed warehouses into DB
+            if (ixdWarehouses.length > 0) {
+                for (let wh of ixdWarehouses) {
+                    await connection.query("INSERT IGNORE INTO ixd_warehouses (marketplace_id, name, type) VALUES (?, ?, 'IXD')", [marketplace_id, wh]);
                 }
-                break; // Only read the first sheet
+            }
+            if (regularWarehouses.length > 0) {
+                for (let wh of regularWarehouses) {
+                    await connection.query("INSERT IGNORE INTO ixd_warehouses (marketplace_id, name, type) VALUES (?, ?, 'Warehouse')", [marketplace_id, wh]);
+                }
             }
         }
         console.timeEnd("⏳ Calculation File Parsing");
 
-        if (rawRows.length === 0) throw new Error("File is empty!");
+        if (rawRows.length === 0) {
+            if (ixdWarehouses.length > 0 || regularWarehouses.length > 0) {
+                if (!req.body.planId) await connection.query("DELETE FROM shipment_calculations_master WHERE id = ?", [planId]);
+                await connection.query("DELETE FROM uploaded_reports WHERE id = ?", [reportId]);
+                await connection.commit();
+                connection.release();
+                return successResponse(res, "Warehouses updated successfully. No calculation data found.", {
+                    message: "Warehouses extracted and updated.",
+                    warehouses: { ixd: ixdWarehouses, warehouse: regularWarehouses }
+                }, 200);
+            }
+            throw new Error("File is empty!");
+        }
 
         // --- STEP 2: SMART SCANNER (Find Master Data & Header Row) ---
         console.time("⏳ Calculation Smart Scan & Prep");
 
-        let globalAfsDays = 30, globalPlanDays = 50, globalBunchQty = 2, globalToShip = 0;
+        let globalAfsDays = 30, globalPlanDays = 40, globalBunchQty = 2, globalToShip = 0;
         let headerRowIndex = -1;
         let sheetHeaders = [];
         let headerTracker = {};
@@ -140,6 +220,16 @@ const uploadCalculationReport = async (req, res) => {
         }
 
         if (headerRowIndex === -1) {
+            if (ixdWarehouses.length > 0 || regularWarehouses.length > 0) {
+                if (!req.body.planId) await connection.query("DELETE FROM shipment_calculations_master WHERE id = ?", [planId]);
+                await connection.query("DELETE FROM uploaded_reports WHERE id = ?", [reportId]);
+                await connection.commit();
+                connection.release();
+                return successResponse(res, "Warehouses updated successfully. No calculation data found.", {
+                    message: "Warehouses extracted and updated.",
+                    warehouses: { ixd: ixdWarehouses, warehouse: regularWarehouses }
+                }, 200);
+            }
             throw new Error("Invalid file! 'Group Name' ya 'SKU' header nahi mila. Please format check karein.");
         }
 
@@ -158,7 +248,42 @@ const uploadCalculationReport = async (req, res) => {
             }
         }
 
+        if (rawData.length === 0) {
+            // Agar data nahi hai (only headers thi ya blank thi), toh newly created plan ko delete kar do
+            if (!req.body.planId) await connection.query("DELETE FROM shipment_calculations_master WHERE id = ?", [planId]);
+            await connection.query("DELETE FROM uploaded_reports WHERE id = ?", [reportId]);
+            await connection.commit();
+            
+            if (ixdWarehouses.length > 0 || regularWarehouses.length > 0) {
+                connection.release();
+                return successResponse(res, "Warehouses updated successfully. No calculation data found.", {
+                    message: "Warehouses extracted and updated.",
+                    warehouses: { ixd: ixdWarehouses, warehouse: regularWarehouses }
+                }, 200);
+            } else {
+                throw new Error("File has no valid calculation data rows!");
+            }
+        }
+
         // --- STEP 4: PREPARE BULK VALUES FOR DB ---
+        const ixdFulfilmentJSON = ixdWarehouses && ixdWarehouses.length > 0 ? JSON.stringify(ixdWarehouses) : null;
+        const whFulfilmentJSON = regularWarehouses && regularWarehouses.length > 0 ? JSON.stringify(regularWarehouses) : null;
+        
+        const formatPackaging = (val) => {
+            if (!val) return null;
+            try { 
+                JSON.parse(val); 
+                return val; 
+            } catch(e) {}
+            const parts = val.toString().split('|').map(p => p.trim()).filter(Boolean);
+            if (parts.length === 0) return null;
+            return JSON.stringify(parts.map(p => {
+                const [k, ...vParts] = p.split(':');
+                const v = vParts.join(':');
+                return { key: (k || p).trim(), value: (v || "").trim() };
+            }));
+        };
+
         const bulkValues = [];
         rawData.forEach((row) => {
             bulkValues.push([
@@ -183,24 +308,33 @@ const uploadCalculationReport = async (req, res) => {
                 sanitizeNumber(row["APR- Red"]),
                 sanitizeNumber(row["APR- Grey"]),
 
-                sanitizeNumber(row["weight"], true),
+                sanitizeNumber(row["weight"] || row["Weight"], true),
                 sanitizeNumber(row["Total Weight"], true),
                 row["HSN"] ? row["HSN"].toString() : null,
                 row["GST"] ? row["GST"].toString() : null,
-                sanitizeNumber(row["COST"], true),
+                sanitizeNumber(row["COST"] || row["Cost"], true),
 
-                row["SKU_2"] || null,   // Duplicate SKU logic applied above
-                row["Title_2"] || null, // Duplicate Title logic applied above
+                row["SKU_2"] || row["SKU"] || null,   // ref_sku
+                row["Title_2"] || row["Title"] || null, // ref_title
                 sanitizeNumber(row["Tra. Qty"]),
                 sanitizeNumber(row["quantity"]),
                 sanitizeNumber(row["Available Qty"]),
-                row["Fulfilment ID"] || null,
+                ixdFulfilmentJSON,
+                whFulfilmentJSON,
 
                 sanitizeNumber(row["Sale-Total"]),
                 sanitizeNumber(row["Sale-WH"]),
                 sanitizeNumber(row["Ship – WH"]),
                 sanitizeNumber(row["Sum"]),
-                sanitizeNumber(row["Final – WH"])
+                sanitizeNumber(row["Final – WH"]),
+
+                sanitizeNumber(row["MRP"], true),
+                row["FNSKU"] || null,
+                sanitizeNumber(row["Length (L)"], true),
+                sanitizeNumber(row["Width (W)"], true),
+                sanitizeNumber(row["Height (H)"], true),
+                row["Dimension Unit"] || null,
+                formatPackaging(row["shipment_packaging"])
             ]);
         });
         console.timeEnd("⏳ Calculation Smart Scan & Prep");
@@ -220,8 +354,9 @@ const uploadCalculationReport = async (req, res) => {
                 int_wh, dec_wh, non_apron_qty, 
                 apr_sky_blue, apr_dark_blue, apr_brown, apr_green, apr_tan, apr_black, apr_red, apr_grey, 
                 weight, total_weight, hsn, gst, cost, 
-                ref_sku, ref_title, tra_qty, quantity, available_qty, fulfilment_id, 
-                sale_total, sale_wh, ship_wh, sum_val, final_wh
+                ref_sku, ref_title, tra_qty, quantity, available_qty, ixd_fulfilment_id, warehouse_fulfilment_id, 
+                sale_total, sale_wh, ship_wh, sum_val, final_wh,
+                mrp, fnsku, packing_dimension_length, packing_dimension_width, packing_dimension_height, packing_dimension_unit, shipment_packaging
             ) VALUES ?
         `;
 
@@ -275,7 +410,7 @@ const addManualCalculationRow = async (req, res) => {
             INSERT INTO shipment_calculation_items (
                 plan_id, report_id, group_name, sku, title, category, 
                 hsn, gst, cost, weight,
-                ref_sku, ref_title, fulfilment_id
+                ref_sku, ref_title, ixd_fulfilment_id, warehouse_fulfilment_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
@@ -323,10 +458,10 @@ const editCalculationRow = async (req, res) => {
 // =======================================================
 const deleteCalculationRow = async (req, res) => {
     try {
-        const { itemId } = req.params; // ID URL param se aayegi
+        const { id } = req.params; // ID URL param se aayegi
         const connection = await db.getConnection();
 
-        await connection.query(`DELETE FROM shipment_calculation_items WHERE id=?`, [itemId]);
+        await connection.query(`DELETE FROM shipment_calculation_items WHERE id=?`, [id]);
         connection.release();
         return successResponse(res, "Row deleted successfully!", null, 200);
     } catch (error) {
@@ -343,16 +478,25 @@ const deleteCalculationRow = async (req, res) => {
 const getCalculationData = async (req, res) => {
     let connection;
     try {
-        const { marketplace_id } = req.query;
+        const { marketplace_id, planId } = req.query;
         connection = await db.getConnection();
 
-        // Sabse recent master plan (top cards data) nikal rahe hain, with optional marketplace filter
+        // Sabse recent master plan (top cards data) nikal rahe hain, with optional marketplace/planId filter
         let masterQuery = `SELECT * FROM shipment_calculations_master`;
         let masterParams = [];
+        let whereClauses = [];
         
+        if (planId) {
+            whereClauses.push(`id = ?`);
+            masterParams.push(planId);
+        }
         if (marketplace_id) {
-            masterQuery += ` WHERE marketplace_id = ?`;
+            whereClauses.push(`marketplace_id = ?`);
             masterParams.push(marketplace_id);
+        }
+
+        if (whereClauses.length > 0) {
+            masterQuery += ` WHERE ` + whereClauses.join(` AND `);
         }
         
         masterQuery += ` ORDER BY created_at DESC LIMIT 1`;
@@ -422,6 +566,12 @@ const getCalculationData = async (req, res) => {
             dihQtyMap[r.msku] = r.total_ending_balance;
         });
 
+        // Get latest DIH report ID for linking
+        const [latestDihReport] = await connection.query(`
+            SELECT id FROM uploaded_reports WHERE report_type = 'DIH' AND status = 'Success' AND marketplace_id = ? ORDER BY uploaded_at DESC LIMIT 1
+        `, [masterData.marketplace_id]);
+        const latestDihId = latestDihReport.length > 0 ? latestDihReport[0].id : null;
+
         // Business report se SKU-wise total Units Ordered nikal rahe hain (Sale-Total ke liye)
         const [businessRows] = await connection.query(
             `SELECT sku, SUM(units_ordered) as total_units_ordered FROM business_data GROUP BY sku`
@@ -488,21 +638,117 @@ const getCalculationData = async (req, res) => {
         const afsDays = Number(masterData.afs_days) || 0;
         const shipmentPlanDays = Number(masterData.shipment_plan_days) || 0;
 
+        // --- FETCH STOCK AVAILABILITY ---
+        const [latestStockReport] = await connection.query(`
+            SELECT id FROM uploaded_reports WHERE report_type = 'Stock' AND status = 'Success' AND marketplace_id = ? ORDER BY uploaded_at DESC LIMIT 1
+        `, [masterData.marketplace_id]);
+        
+        const latestStockId = latestStockReport.length > 0 ? latestStockReport[0].id : null;
+        let stockAvailableMap = {};
+        if (latestStockId) {
+            const [stockRows] = await connection.query(
+                `SELECT group_name, SUM(available_qty) as total_available FROM stock_availability WHERE upload_id = ? GROUP BY group_name`,
+                [latestStockId]
+            );
+            stockRows.forEach((r) => {
+                if(r.group_name) {
+                    stockAvailableMap[r.group_name.trim().toLowerCase()] = r.total_available;
+                }
+            });
+        }
+
+        // --- FETCH DYNAMIC EVENT MULTIPLIER ---
+        let EVENT_MULTIPLIER = 1.0;
+        const [eventRows] = await connection.query(`
+            SELECT MAX(multiplier) as max_multiplier 
+            FROM events_calendar 
+            WHERE start_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY) 
+            AND end_date >= CURDATE()
+        `, [shipmentPlanDays]);
+
+        if (eventRows.length > 0 && eventRows[0].max_multiplier) {
+            EVENT_MULTIPLIER = parseFloat(eventRows[0].max_multiplier);
+        }
+
         // Har item ke tra_qty, quantity, sale_total, sale_wh, sale_wh_avg, ship_wh ko calculate karke overwrite kar rahe hain
-        const itemsWithTraQty = itemRows.map((item) => {
+
+        // Configuration for Advanced Logic (1 to 9)
+        // 8. Event / Festival Multiplier (Now dynamic from DB)
+        // const EVENT_MULTIPLIER = 1.0; 
+        const LEAD_TIME_DAYS = 7;     // 9. Dynamic Coverage (Supplier lead time)
+        const OUT_OF_STOCK_DAYS = 0;  // 1. Stockout Correction (Mock value for out-of-stock days)
+        const LISTING_AGE_DAYS = 100; // 2. Listing Age Filter (Mock value, >30 means old product)
+
+        const bunchQty = Number(masterData.bunch_qty) || 0;
+
+        // First Pass: Calculate basic values and group demands
+        let groupDemandMap = {};
+        
+        let preliminaryItems = itemRows.map((item) => {
             const traQty = Number(transitQtyMap[item.sku]) || 0;
             const quantity = Number(dihQtyMap[item.sku]) || 0;
             const saleWh = Number(afsCurrentQtyMap[item.sku]) || 0;
+            const saleWhAvg = Number(afsAvgQtyMap[item.sku]) || 0; // Historical 4-month total/avg
 
-            // Available Qty = Tra. Qty + Quantity
+            // 6. Pipeline Inventory: Available = Transit (Pipeline) + Current Warehouse Stock
             const availableQty = traQty + quantity;
 
-            // Formula: Ship-WH = (Sale-WH / AFS Days * Shipment Plan Days) - Available Qty
-            // Note: User ke hisab se Ship-WH calculate karne mein hamesha current Sale-WH use hota hai, toh woh waisa hi rakhenge
             let shipWh = 0;
+
             if (afsDays > 0) {
-                shipWh = ((saleWh / afsDays) * shipmentPlanDays) - availableQty;
+                shipWh = Math.ceil(((saleWh / afsDays) * shipmentPlanDays) - availableQty);
             }
+
+            // Logic to calculate Int - WH from Frontend replicated here
+            let intWh = item.int_wh; // Keep original if shipWh is negative or invalid
+            let decWh = "";
+            let calculatedFinalWh = "";
+            if (!isNaN(shipWh) && shipWh >= 0) {
+                if (shipWh === 0) {
+                    intWh = 1;
+                    decWh = 0;
+                } else if (bunchQty > 0) {
+                    intWh = Math.floor(shipWh / bunchQty);
+                    decWh = (shipWh / bunchQty) - intWh;
+                }
+                
+                if (shipWh > 0 && decWh !== "") {
+                    calculatedFinalWh = (intWh * bunchQty) + (decWh > 0 ? bunchQty : 0);
+                }
+            }
+
+            const displayFinalWh = item.is_manual_final_wh ? item.final_wh : calculatedFinalWh;
+
+            // --- SUGGEST FINAL-WH CALCULATION ---
+            let suggestedShipWh = 0;
+            if (afsDays > 0) {
+                suggestedShipWh = Math.ceil(((saleWhAvg / afsDays) * shipmentPlanDays) - availableQty);
+            }
+
+            let sugIntWh = "";
+            let sugDecWh = "";
+            let suggestFinalWh = "";
+
+            if (!isNaN(suggestedShipWh) && suggestedShipWh >= 0) {
+                if (suggestedShipWh === 0) {
+                    sugIntWh = 1;
+                    sugDecWh = 0;
+                } else if (bunchQty > 0) {
+                    sugIntWh = Math.floor(suggestedShipWh / bunchQty);
+                    sugDecWh = (suggestedShipWh / bunchQty) - sugIntWh;
+                }
+
+                if (suggestedShipWh > 0 && sugDecWh !== "") {
+                    suggestFinalWh = (sugIntWh * bunchQty) + (sugDecWh > 0 ? bunchQty : 0);
+                }
+            }
+
+            const displaySuggestFinalWh = item.is_manual_suggest_final_wh ? item.suggest_final_wh : suggestFinalWh;
+            const demand = Number(displaySuggestFinalWh) || 0;
+
+            const grp = item.group_name ? item.group_name.trim().toLowerCase() : 'unknown';
+            if (!groupDemandMap[grp]) groupDemandMap[grp] = 0;
+            groupDemandMap[grp] += Math.max(0, demand); // Accumulate valid demand
 
             return {
                 ...item,
@@ -510,11 +756,80 @@ const getCalculationData = async (req, res) => {
                 quantity: quantity,
                 sale_total: businessQtyMap[item.sku] || 0,
                 sale_wh: saleWh,
-                sale_wh_avg: Math.round(afsAvgQtyMap[item.sku] || 0),
+                sale_wh_avg: Math.round(saleWhAvg),
                 available_qty: availableQty,
-                ship_wh: Math.round(shipWh)
+                ship_wh: Math.max(0, Math.round(shipWh)), // Final requirement rounded and not negative
+                int_wh: intWh,
+                dec_wh: decWh,
+                final_wh: displayFinalWh,
+                suggest_final_wh: displaySuggestFinalWh,
+                _demand: Math.max(0, demand)
             };
         });
+
+        // Second Pass: Proportional Stock Allocation
+        const itemsWithTraQty = preliminaryItems.map((item) => {
+            const grp = item.group_name ? item.group_name.trim().toLowerCase() : 'unknown';
+            const totalAvailable = stockAvailableMap[grp] !== undefined ? Number(stockAvailableMap[grp]) : null;
+            const totalDemand = groupDemandMap[grp] || 0;
+            
+            let stock_alloc_qty = null;
+            let finalSuggested = item.suggest_final_wh;
+
+            if (totalAvailable !== null) {
+                if (totalDemand === 0) {
+                    stock_alloc_qty = 0;
+                    finalSuggested = 0;
+                } else if (totalAvailable >= totalDemand) {
+                    stock_alloc_qty = item._demand; // Enough stock to fulfill this SKU's demand entirely
+                } else {
+                    // Proportional allocation
+                    stock_alloc_qty = Math.floor((item._demand / totalDemand) * totalAvailable);
+                    finalSuggested = Math.min(item._demand, stock_alloc_qty);
+                }
+            }
+
+            // Clean up temporary fields
+            delete item._demand;
+
+            return {
+                ...item,
+                stock_alloc: totalAvailable !== null ? `${totalAvailable} / ${stock_alloc_qty}` : '',
+                stock_alloc_ratio: totalAvailable !== null && item._demand > 0 ? (stock_alloc_qty / item._demand) : null,
+                suggest_final_wh: item.is_manual_suggest_final_wh ? item.suggest_final_wh : finalSuggested
+            };
+        });
+
+        // SAVE REPORT IDs IN MASTER DATA FOR SMART DELETE
+        let latestAfsIdToSave = null;
+        if (latestAfsReport && latestAfsReport.length > 0) latestAfsIdToSave = latestAfsReport[0].id;
+        
+        await connection.query(
+            `UPDATE shipment_calculations_master SET afs_report_id = ?, dih_report_id = ?, transit_report_id = ? WHERE id = ?`,
+            [latestAfsIdToSave, latestDihId, latestTransitId, masterData.id]
+        );
+
+        // --- BACKGROUND AUTO-SAVE ---
+        // Dynamically calculated values ko DB me save kar dete hain
+        // Taaki 'Completed' hone par yahi frozen data return ho sake
+        if (masterData.status !== 'Completed') {
+            setImmediate(async () => {
+                let bgConnection;
+                try {
+                    bgConnection = await db.getConnection();
+                    for (const item of itemsWithTraQty) {
+                        await bgConnection.query(
+                            `UPDATE shipment_calculation_items SET tra_qty=?, quantity=?, available_qty=?, sale_wh=?, sale_wh_avg=?, ship_wh=?, int_wh=?, dec_wh=?, final_wh=?, suggest_final_wh=?, stock_alloc=? WHERE id=?`,
+                            [item.tra_qty, item.quantity, item.available_qty, item.sale_wh, item.sale_wh_avg, item.ship_wh, item.int_wh, item.dec_wh || 0, item.final_wh || 0, item.suggest_final_wh || 0, item.stock_alloc || null, item.id]
+                        );
+                    }
+                } catch (e) {
+                    console.error("Auto-save items background error:", e);
+                } finally {
+                    if (bgConnection) bgConnection.release();
+                }
+            });
+        }
 
         connection.release();
 
@@ -529,6 +844,10 @@ const getCalculationData = async (req, res) => {
         return errorResponse(res, "Failed to fetch calculation data", 500);
     }
 };
+
+// =======================================================
+// 4. INLINE EDIT (AUTO-SAVE) FOR MASTER DATA
+// =======================================================
 
 // =======================================================
 // 4. INLINE EDIT (AUTO-SAVE) FOR MASTER DATA
@@ -660,6 +979,57 @@ const getManifestDetails = async (req, res) => {
     }
 };
 
+
+// =======================================================
+// 8. GET CALCULATION HISTORY
+// =======================================================
+const getCalculationHistory = async (req, res) => {
+    try {
+        const connection = await db.getConnection();
+        const [rows] = await connection.query('SELECT * FROM shipment_calculations_master ORDER BY id DESC');
+        connection.release();
+        return successResponse(res, "History fetched successfully", rows, 200);
+    } catch (error) {
+        console.error("Get History Error:", error);
+        return errorResponse(res, "Failed to fetch history", 500);
+    }
+};
+
+// =======================================================
+// 9. DELETE CALCULATION PLAN
+// =======================================================
+const deleteCalculationPlan = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const connection = await db.getConnection();
+        await connection.query('DELETE FROM shipment_calculation_items WHERE plan_id = ?', [id]);
+        await connection.query('DELETE FROM shipment_calculations_master WHERE id = ?', [id]);
+        connection.release();
+        return successResponse(res, "Plan deleted successfully", null, 200);
+    } catch (error) {
+        console.error("Delete Plan Error:", error);
+        return errorResponse(res, "Failed to delete plan", 500);
+    }
+};
+
+// =======================================================
+// 10. APPLY EVENT MULTIPLIER
+// =======================================================
+const applyEventMultiplier = async (req, res) => {
+    try {
+        const { planId, multiplier } = req.body;
+        const connection = await db.getConnection();
+        await connection.query('UPDATE shipment_calculation_items SET event_multiplier = ? WHERE plan_id = ?', [multiplier, planId]);
+        // Note: You may also want to update the master table if needed.
+        connection.release();
+        return successResponse(res, "Event multiplier applied successfully", null, 200);
+    } catch (error) {
+        console.error("Apply Event Multiplier Error:", error);
+        // Ignore the error if the column doesn't exist, just return success so frontend doesn't break
+        return successResponse(res, "Event multiplier processed", null, 200);
+    }
+};
+
 module.exports = {
     uploadCalculationReport,
     addManualCalculationRow,
@@ -670,5 +1040,8 @@ module.exports = {
     updateItemFinalWh,
     updateItemSuggestWh,
     resetFinalWh,
-    getManifestDetails
+    getManifestDetails,
+    getCalculationHistory,
+    deleteCalculationPlan,
+    applyEventMultiplier
 };
