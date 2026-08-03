@@ -211,7 +211,17 @@ const Calculation = () => {
                 } else {
                     setMasterData({});
                 }
-                setCalculationData(response.data.data.items || []);
+                const fetchedItems = response.data.data.items || [];
+                const parsedItems = fetchedItems.map(item => {
+                    let parsedFcBreakdown = item.fc_breakdown;
+                    if (typeof parsedFcBreakdown === 'string') {
+                        try {
+                            parsedFcBreakdown = JSON.parse(parsedFcBreakdown);
+                        } catch (e) { }
+                    }
+                    return { ...item, fc_breakdown: parsedFcBreakdown };
+                });
+                setCalculationData(parsedItems);
                 setIsLoading(false);
             }
         } catch (error) {
@@ -679,6 +689,7 @@ const Calculation = () => {
         uploadData.append("file", selectedFile);
         uploadData.append("fileType", "Calculation"); // 🔥 NAYA ADD KIYA: Backend/Middleware ke liye
         uploadData.append("marketplace_id", selectedMarketplaceId);
+        uploadData.append("shipment_mode", shipmentMode); // FC or IXD mode
 
         // Agar koi plan already open hai, toh uska planId bhejenge taaki usi me append ho
         const currentPlanId = selectedHistoryPlanId || (masterData && masterData.id);
@@ -1338,7 +1349,7 @@ const Calculation = () => {
     const initWHSpan = getColSpan(['int_wh', 'dec_wh', 'non_apron_qty']);
     const variantsSpan = getColSpan(['sky_blue', 'dark_blue', 'brown', 'green', 'tan', 'black', 'red', 'grey'].filter(c => activeVariantCols[c]));
     const specsSpan = getColSpan(['weight', 'total_weight', 'hsn', 'gst', 'cost']);
-    const logisticsSpan = getColSpan(['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', /*'sale_total',*/ 'sale_wh', 'sale_wh_avg', 'ship_wh', 'sum_val', 'final_wh', 'suggest_final_wh', 'stock_alloc']);
+    const logisticsSpan = getColSpan(['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', /*'sale_total',*/ 'sale_wh', 'sale_wh_avg', 'ship_wh', 'sum_val', 'final_wh', 'suggest_final_wh', 'stock_alloc']) + (shipmentMode === 'FC' ? 1 : 0);
 
     // 🔥 NAYA: Group Checkbox Toggle Logic
     const colGroupsConfig = {
@@ -1774,8 +1785,7 @@ const Calculation = () => {
                                         {visibleColumns.tra_qty && <col ref={el => colRefs.current.tra_qty = el} style={{ width: colWidthsRef.current.tra_qty }} />}
                                         {visibleColumns.quantity && <col ref={el => colRefs.current.quantity = el} style={{ width: colWidthsRef.current.quantity }} />}
                                         {visibleColumns.available_qty && <col ref={el => colRefs.current.available_qty = el} style={{ width: colWidthsRef.current.available_qty }} />}
-
-                                        {/* {visibleColumns.sale_total && <col ref={el => colRefs.current.sale_total = el} style={{ width: colWidthsRef.current.sale_total }} />} */}
+                                        {shipmentMode === 'FC' && <col style={{ width: 100 }} />}
                                         {visibleColumns.sale_wh_avg && <col ref={el => colRefs.current.sale_wh_avg = el} style={{ width: colWidthsRef.current.sale_wh_avg }} />}
                                         {visibleColumns.sale_wh && <col ref={el => colRefs.current.sale_wh = el} style={{ width: colWidthsRef.current.sale_wh }} />}
                                         {visibleColumns.ship_wh && <col ref={el => colRefs.current.ship_wh = el} style={{ width: colWidthsRef.current.ship_wh }} />}
@@ -1910,7 +1920,7 @@ const Calculation = () => {
                                                 {visibleColumns.tra_qty && <th style={{ width: colWidthsRef.current.tra_qty, minWidth: colWidthsRef.current.tra_qty }} className="px-4 py-3 text-center bg-orange-50 relative group">Tra. Qty<div onMouseDown={handleResizeMouseDown('tra_qty')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                                 {visibleColumns.quantity && <th style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center bg-orange-50 relative group">DIH Quantity<div onMouseDown={handleResizeMouseDown('quantity')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                                 {visibleColumns.available_qty && <th style={{ width: colWidthsRef.current.available_qty, minWidth: colWidthsRef.current.available_qty }} className="px-4 py-3 text-center bg-orange-50 text-[#5A5DF6] font-bold relative group">Available Qty<div onMouseDown={handleResizeMouseDown('available_qty')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-
+                                                {shipmentMode === 'FC' && <th style={{ width: 100, minWidth: 100 }} className="px-4 py-3 text-center bg-orange-50 text-[#1C2340] font-bold">FC</th>}
                                                 {/* {visibleColumns.sale_total && <th style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-Total<div onMouseDown={handleResizeMouseDown('sale_total')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>} */}
                                                 {visibleColumns.sale_wh_avg && <th style={{ width: colWidthsRef.current.sale_wh_avg, minWidth: colWidthsRef.current.sale_wh_avg }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-WH(4 MOS AVG)<div onMouseDown={handleResizeMouseDown('sale_wh_avg')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                                 {visibleColumns.sale_wh && <th style={{ width: colWidthsRef.current.sale_wh, minWidth: colWidthsRef.current.sale_wh }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-WH-CUR<div onMouseDown={handleResizeMouseDown('sale_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
@@ -2056,6 +2066,7 @@ const Calculation = () => {
                                                             {visibleColumns.tra_qty && <td style={{ width: colWidthsRef.current.tra_qty, minWidth: colWidthsRef.current.tra_qty }} className="px-4 py-3 text-center font-semibold text-[#5A5DF6]">{row.tra_qty}</td>}
                                                             {visibleColumns.quantity && <td style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center">{row.quantity}</td>}
                                                             {visibleColumns.available_qty && <td style={{ width: colWidthsRef.current.available_qty, minWidth: colWidthsRef.current.available_qty }} className="px-4 py-3 text-center font-bold text-[#1C2340] bg-[#F4F5F7]/50">{row.available_qty}</td>}
+                                                            {shipmentMode === 'FC' && <td style={{ width: 100, minWidth: 100 }} className="px-4 py-3 text-center font-bold text-gray-400 bg-[#F4F5F7]/20">-</td>}
 
                                                             {/* {visibleColumns.sale_total && <td style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center">{row.sale_total}</td>} */}
                                                             {visibleColumns.sale_wh_avg && <td style={{ width: colWidthsRef.current.sale_wh_avg, minWidth: colWidthsRef.current.sale_wh_avg }} className="px-4 py-3 text-center font-medium text-[#1C2340] bg-orange-50/20">{row.sale_wh_avg}</td>}
@@ -2197,11 +2208,12 @@ const Calculation = () => {
 
                                                 {/* Sub-rows for Multi-FC Mode */}
                                                 {shipmentMode === 'FC' && expandedRows[row.id] && row.fc_breakdown && (
-                                                    <tr className="bg-[#F4F5F7]/30 border-b border-[#D9DDE5]/50">
+                                                    <tr className="bg-[#F8F9FA] border-b border-[#D9DDE5]">
                                                         <td colSpan={100} className="p-0">
-                                                            <table className="w-full text-left" style={{ tableLayout: 'fixed' }}>
+                                                            <table className="w-full text-left text-xs text-[#1C2340]/80" style={{ tableLayout: 'fixed' }}>
                                                                 <colgroup>
                                                                     {/* Duplicate the exact colgroup from parent to maintain perfect alignment */}
+                                                                    <col style={{ width: 64 }} />
                                                                     {collapsedGroups.product ? <col style={{ width: 40 }} /> : (
                                                                         <>
                                                                             {visibleColumns.group_name && <col style={{ width: colWidthsRef.current.group_name }} />}
@@ -2245,8 +2257,9 @@ const Calculation = () => {
                                                                             {visibleColumns.tra_qty && <col style={{ width: colWidthsRef.current.tra_qty }} />}
                                                                             {visibleColumns.quantity && <col style={{ width: colWidthsRef.current.quantity }} />}
                                                                             {visibleColumns.available_qty && <col style={{ width: colWidthsRef.current.available_qty }} />}
-                                                                            {visibleColumns.sale_wh && <col style={{ width: colWidthsRef.current.sale_wh }} />}
+                                                                            {shipmentMode === 'FC' && <col style={{ width: 100 }} />}
                                                                             {visibleColumns.sale_wh_avg && <col style={{ width: colWidthsRef.current.sale_wh_avg }} />}
+                                                                            {visibleColumns.sale_wh && <col style={{ width: colWidthsRef.current.sale_wh }} />}
                                                                             {visibleColumns.ship_wh && <col style={{ width: colWidthsRef.current.ship_wh }} />}
                                                                             {visibleColumns.sum_val && <col style={{ width: colWidthsRef.current.sum_val }} />}
                                                                             {visibleColumns.stock_alloc && <col style={{ width: colWidthsRef.current.stock_alloc }} />}
@@ -2256,13 +2269,14 @@ const Calculation = () => {
                                                                     )}
                                                                 </colgroup>
                                                                 <tbody>
-                                                                    {Object.entries(row.fc_breakdown).map(([fcName, data]) => (
-                                                                        <tr key={fcName} className="hover:bg-blue-50/20 transition-colors">
+                                                                    {Object.entries(row.fc_breakdown).map(([fcName, data], fcIdx, fcArr) => (
+                                                                        <tr key={fcName} className={`hover:bg-[#F0F2F5] transition-colors ${fcIdx !== fcArr.length - 1 ? 'border-b border-[#D9DDE5]/40' : ''}`}>
+                                                                            <td className="px-4 py-2 border-r border-[#D9DDE5]/30"></td>
                                                                             {collapsedGroups.product ? <td className="px-4 py-2 border-r border-[#D9DDE5]/40"></td> : (
                                                                                 <>
                                                                                     {visibleColumns.group_name && <td className="px-4 py-2 border-r border-[#D9DDE5]/30"></td>}
-                                                                                    {visibleColumns.sku && <td className="px-4 py-2 font-bold text-[#5A5DF6] whitespace-nowrap pl-6">↳ {fcName}</td>}
-                                                                                    {visibleColumns.title && <td className="px-4 py-2 text-[10px] text-blue-600 font-medium">Sale Ratio: {(data.ratio * 100).toFixed(1)}%</td>}
+                                                                                    {visibleColumns.sku && <td className="px-4 py-2 border-r border-[#D9DDE5]/30"></td>}
+                                                                                    {visibleColumns.title && <td className="px-4 py-2"></td>}
                                                                                     {visibleColumns.category && <td className="px-4 py-2"></td>}
                                                                                 </>
                                                                             )}
@@ -2302,25 +2316,57 @@ const Calculation = () => {
                                                                                 <>
                                                                                     {visibleColumns.ref_sku && <td className="px-4 py-2 border-l border-[#D9DDE5]/30"></td>}
                                                                                     {visibleColumns.ref_title && <td className="px-4 py-2"></td>}
-                                                                                    {visibleColumns.tra_qty && <td className="px-4 py-2"></td>}
-                                                                                    {visibleColumns.quantity && <td className="px-4 py-2"></td>}
-                                                                                    {visibleColumns.available_qty && <td className="px-4 py-2"></td>}
-                                                                                    {visibleColumns.sale_wh && <td className="px-4 py-2 text-center bg-blue-50/30 font-medium text-[#1C2340]">{data.sale_wh}</td>}
-                                                                                    {visibleColumns.sale_wh_avg && <td className="px-4 py-2 text-center bg-blue-50/30 text-[#1C2340]/60">{data.sale_wh_avg}</td>}
-                                                                                    {visibleColumns.ship_wh && <td className="px-4 py-2 text-center font-bold bg-[#E8F0FE]">{/* Ship WH for FC not calculated */}</td>}
+                                                                                    {visibleColumns.tra_qty && <td className="px-4 py-2 text-center font-semibold text-[#5A5DF6]">{data.tra_qty}</td>}
+                                                                                    {visibleColumns.quantity && <td className="px-4 py-2 text-center font-medium">{data.quantity}</td>}
+                                                                                    {visibleColumns.available_qty && <td className="px-4 py-2 text-center font-bold text-[#1C2340] bg-[#F4F5F7]/50">{data.available_qty}</td>}
+                                                                                    {shipmentMode === 'FC' && <td className="px-4 py-2 text-center font-bold text-[#5A5DF6] bg-blue-50/20">{fcName}</td>}
+                                                                                    {visibleColumns.sale_wh_avg && <td className="px-4 py-2 text-center font-medium text-[#1C2340] bg-orange-50/20">{data.sale_wh_avg}</td>}
+                                                                                    {visibleColumns.sale_wh && <td className="px-4 py-2 text-center">{data.sale_wh}</td>}
+                                                                                    {visibleColumns.ship_wh && <td className="px-4 py-2 text-center">{liveAfsDays > 0 ? Math.ceil(((data.sale_wh / liveAfsDays) * livePlanDays) - data.available_qty) : 0}</td>}
                                                                                     {visibleColumns.sum_val && <td className="px-4 py-2 text-center font-bold bg-[#F4F5F7]"></td>}
-                                                                                    {visibleColumns.stock_alloc && <td className="px-4 py-2 text-center font-bold text-[#E74C3C] bg-red-50/30"></td>}
+                                                                                    {visibleColumns.stock_alloc && <td className="px-4 py-2 text-center font-bold text-[#E74C3C] bg-red-50/30">{data.stock_alloc !== null && data.stock_alloc !== undefined ? data.stock_alloc : ''}</td>}
                                                                                     {visibleColumns.final_wh && (
-                                                                                        <td className="px-4 py-2 text-center bg-[#E8F0FE]">
-                                                                                            <input
-                                                                                                type="number"
-                                                                                                value={data.final_wh === "" ? "" : data.final_wh}
-                                                                                                onChange={(e) => handleFcFinalWhSubmit(row.id, fcName, e.target.value)}
-                                                                                                className="w-16 text-center border-b border-blue-400 bg-transparent outline-none focus:border-blue-600 font-bold text-[#1C2340]"
-                                                                                            />
+                                                                                        <td className={`px-4 py-2 text-center ${!useSuggestedWh ? 'bg-[#22B573]/10' : 'bg-orange-50/30 opacity-60'}`}>
+                                                                                            <div className="flex items-center justify-center gap-1">
+                                                                                                <input
+                                                                                                    type="number"
+                                                                                                    value={data.final_wh === "" ? data.suggest_final_wh : data.final_wh}
+                                                                                                    onChange={(e) => handleFcFinalWhSubmit(row.id, fcName, e.target.value)}
+                                                                                                    className="w-14 text-center font-bold bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none transition-colors"
+                                                                                                    style={{ color: data.final_wh !== "" ? '#5A5DF6' : '#1C2340' }}
+                                                                                                />
+                                                                                                {data.stock_alloc && typeof data.stock_alloc === 'string' && data.stock_alloc.includes(' / ') && (
+                                                                                                    <>
+                                                                                                        <span className="text-[#1C2340]/60 mx-1">/</span>
+                                                                                                        <span className={
+                                                                                                            data.fc_demand > 0 && (Number(data.stock_alloc.split(' / ')[1]) / data.fc_demand) >= 1 ? 'text-[#22B573] text-xs font-bold' :
+                                                                                                            data.fc_demand > 0 ? 'text-[#E74C3C] text-xs font-bold' : 'text-[#1C2340] text-xs font-bold'
+                                                                                                        }>
+                                                                                                            {data.stock_alloc.split(' / ')[1]}
+                                                                                                        </span>
+                                                                                                    </>
+                                                                                                )}
+                                                                                            </div>
                                                                                         </td>
                                                                                     )}
-                                                                                    {visibleColumns.suggest_final_wh && <td className="px-4 py-2 text-center bg-green-50/30 text-[#22B573] font-bold">{data.suggest_final_wh}</td>}
+                                                                                    {visibleColumns.suggest_final_wh && (
+                                                                                        <td className={`px-4 py-2 text-center font-bold ${useSuggestedWh ? 'bg-[#22B573]/10 text-[#1e9d64]' : 'bg-orange-50/30 text-[#5A5DF6] opacity-60'}`}>
+                                                                                            <span className="flex items-center justify-center">
+                                                                                                <span className="text-[#1C2340]">{data.suggest_final_wh}</span>
+                                                                                                {data.stock_alloc && typeof data.stock_alloc === 'string' && data.stock_alloc.includes(' / ') && (
+                                                                                                    <>
+                                                                                                        <span className="text-[#1C2340]/60 mx-1">/</span>
+                                                                                                        <span className={
+                                                                                                            data.fc_demand > 0 && (Number(data.stock_alloc.split(' / ')[1]) / data.fc_demand) >= 1 ? 'text-[#22B573]' :
+                                                                                                            data.fc_demand > 0 ? 'text-[#E74C3C]' : 'text-[#1C2340]'
+                                                                                                        }>
+                                                                                                            {data.stock_alloc.split(' / ')[1]}
+                                                                                                        </span>
+                                                                                                    </>
+                                                                                                )}
+                                                                                            </span>
+                                                                                        </td>
+                                                                                    )}
                                                                                 </>
                                                                             )}
                                                                         </tr>

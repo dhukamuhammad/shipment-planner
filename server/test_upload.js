@@ -1,39 +1,36 @@
 const fs = require('fs');
 const ExcelJS = require('exceljs');
-const path = require('path');
-const db = require('./config/db');
 const { uploadCalculationReport } = require('./controller/calculation/calculation');
+const db = require('./config/db');
 
-async function testUpload() {
+async function test() {
+    const req = {
+        file: {
+            size: 1024,
+            originalname: 'test.xlsx',
+            filename: 'test_file_fake.xlsx',
+            path: 'test_file_fake.xlsx'
+        },
+        body: {
+            marketplace_id: 1,
+            shipment_mode: 'FC'
+        }
+    };
+    const res = {
+        status: (c) => ({ json: (data) => console.log('Response:', c, data) })
+    };
+    // Create a fake excel
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Calculation');
+    sheet.addRow(['Group Name', 'SKU', 'Title', 'Category', 'Int – WH', 'Dec – WH', 'Non Apron Qty', 'Sale-Total', 'Sale-WH', 'Ship – WH', 'Sum', 'Final – WH', 'MRP', 'FNSKU', 'Length (L)', 'Width (W)', 'Height (H)', 'Dimension Unit', 'shipment_packaging']);
+    sheet.addRow(['Apron', 'Apron_Black', 'Apron Black', 'Kitchen', 0, 0, 0, 10, 5, 2, 0, 2, 100, 'FNSKU1', 10, 10, 10, 'cm', 'poly']);
+    await workbook.xlsx.writeFile('test_file_fake.xlsx');
+    
     try {
-        const workbook = new ExcelJS.Workbook();
-        const sheet = workbook.addWorksheet('Template');
-        sheet.addRow(['Group Name', 'SKU', 'Title', 'Category', 'HSN', 'GST', 'Cost', 'Weight', 'MRP', 'FNSKU', 'shipment_packaging', 'Length (L)', 'Width (W)', 'Height (H)', 'Dimension Unit']);
-        sheet.addRow(['Grp1', 'SKU123', 'My Title', 'Cat1', '1234', '18', '100', '1.5', '200', 'FN123', 'box', '10', '10', '10', 'cm']);
-        await workbook.xlsx.writeFile('test_template3.xlsx');
-        console.log('Created test_template3.xlsx');
-
-        const req = {
-            file: {
-                originalname: 'test_template3.xlsx',
-                path: 'test_template3.xlsx',
-                size: 5000,
-                filename: 'test_template3.xlsx'
-            },
-            body: {
-                marketplace_id: 1
-            }
-        };
-        
-        const res = {
-            status: function(code) { this.statusCode = code; return this; },
-            json: function(data) { console.log('Response JSON:', data); }
-        };
-
         await uploadCalculationReport(req, res);
-    } catch(e) {
-        console.error(e);
+    } catch (e) {
+        console.error('Error:', e);
     }
     process.exit(0);
 }
-testUpload();
+test();

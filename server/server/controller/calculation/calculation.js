@@ -58,12 +58,17 @@ const uploadCalculationReport = async (req, res) => {
         );
         reportId = reportResult.insertId;
 
-        // 2. Create Master entry for Top Cards
-        const [masterResult] = await connection.query(
-            `INSERT INTO shipment_calculations_master (report_id, status, marketplace_id) VALUES (?, 'Draft', ?)`,
-            [reportId, marketplace_id] // <--- Yahan reportId pass kiya
-        );
-        const planId = masterResult.insertId;
+        // 2. Check if appending to an existing plan
+        let planId = req.body.planId;
+        
+        if (!planId) {
+            // Create Master entry for Top Cards
+            const [masterResult] = await connection.query(
+                `INSERT INTO shipment_calculations_master (report_id, status, marketplace_id) VALUES (?, 'Draft', ?)`,
+                [reportId, marketplace_id]
+            );
+            planId = masterResult.insertId;
+        }
 
         console.time("⏳ Calculation File Parsing");
 
@@ -153,7 +158,7 @@ const uploadCalculationReport = async (req, res) => {
 
         if (rawRows.length === 0) {
             if (ixdWarehouses.length > 0 || regularWarehouses.length > 0) {
-                await connection.query("DELETE FROM shipment_calculations_master WHERE id = ?", [planId]);
+                if (!req.body.planId) await connection.query("DELETE FROM shipment_calculations_master WHERE id = ?", [planId]);
                 await connection.query("DELETE FROM uploaded_reports WHERE id = ?", [reportId]);
                 await connection.commit();
                 connection.release();
@@ -168,7 +173,7 @@ const uploadCalculationReport = async (req, res) => {
         // --- STEP 2: SMART SCANNER (Find Master Data & Header Row) ---
         console.time("⏳ Calculation Smart Scan & Prep");
 
-        let globalAfsDays = 30, globalPlanDays = 50, globalBunchQty = 2, globalToShip = 0;
+        let globalAfsDays = 30, globalPlanDays = 40, globalBunchQty = 2, globalToShip = 0;
         let headerRowIndex = -1;
         let sheetHeaders = [];
         let headerTracker = {};
@@ -216,7 +221,7 @@ const uploadCalculationReport = async (req, res) => {
 
         if (headerRowIndex === -1) {
             if (ixdWarehouses.length > 0 || regularWarehouses.length > 0) {
-                await connection.query("DELETE FROM shipment_calculations_master WHERE id = ?", [planId]);
+                if (!req.body.planId) await connection.query("DELETE FROM shipment_calculations_master WHERE id = ?", [planId]);
                 await connection.query("DELETE FROM uploaded_reports WHERE id = ?", [reportId]);
                 await connection.commit();
                 connection.release();
@@ -245,7 +250,7 @@ const uploadCalculationReport = async (req, res) => {
 
         if (rawData.length === 0) {
             // Agar data nahi hai (only headers thi ya blank thi), toh newly created plan ko delete kar do
-            await connection.query("DELETE FROM shipment_calculations_master WHERE id = ?", [planId]);
+            if (!req.body.planId) await connection.query("DELETE FROM shipment_calculations_master WHERE id = ?", [planId]);
             await connection.query("DELETE FROM uploaded_reports WHERE id = ?", [reportId]);
             await connection.commit();
             
@@ -264,6 +269,21 @@ const uploadCalculationReport = async (req, res) => {
         const ixdFulfilmentJSON = ixdWarehouses && ixdWarehouses.length > 0 ? JSON.stringify(ixdWarehouses) : null;
         const whFulfilmentJSON = regularWarehouses && regularWarehouses.length > 0 ? JSON.stringify(regularWarehouses) : null;
         
+        const formatPackaging = (val) => {
+            if (!val) return null;
+            try { 
+                JSON.parse(val); 
+                return val; 
+            } catch(e) {}
+            const parts = val.toString().split('|').map(p => p.trim()).filter(Boolean);
+            if (parts.length === 0) return null;
+            return JSON.stringify(parts.map(p => {
+                const [k, ...vParts] = p.split(':');
+                const v = vParts.join(':');
+                return { key: (k || p).trim(), value: (v || "").trim() };
+            }));
+        };
+
         const bulkValues = [];
         rawData.forEach((row) => {
             bulkValues.push([
@@ -288,14 +308,14 @@ const uploadCalculationReport = async (req, res) => {
                 sanitizeNumber(row["APR- Red"]),
                 sanitizeNumber(row["APR- Grey"]),
 
-                sanitizeNumber(row["weight"], true),
+                sanitizeNumber(row["weight"] || row["Weight"], true),
                 sanitizeNumber(row["Total Weight"], true),
                 row["HSN"] ? row["HSN"].toString() : null,
                 row["GST"] ? row["GST"].toString() : null,
-                sanitizeNumber(row["COST"], true),
+                sanitizeNumber(row["COST"] || row["Cost"], true),
 
-                row["SKU_2"] || null,   // Duplicate SKU logic applied above
-                row["Title_2"] || null, // Duplicate Title logic applied above
+                row["SKU_2"] || row["SKU"] || null,   // ref_sku
+                row["Title_2"] || row["Title"] || null, // ref_title
                 sanitizeNumber(row["Tra. Qty"]),
                 sanitizeNumber(row["quantity"]),
                 sanitizeNumber(row["Available Qty"]),
@@ -306,7 +326,15 @@ const uploadCalculationReport = async (req, res) => {
                 sanitizeNumber(row["Sale-WH"]),
                 sanitizeNumber(row["Ship – WH"]),
                 sanitizeNumber(row["Sum"]),
-                sanitizeNumber(row["Final – WH"])
+                sanitizeNumber(row["Final – WH"]),
+
+                sanitizeNumber(row["MRP"], true),
+                row["FNSKU"] || null,
+                sanitizeNumber(row["Length (L)"], true),
+                sanitizeNumber(row["Width (W)"], true),
+                sanitizeNumber(row["Height (H)"], true),
+                row["Dimension Unit"] || null,
+                formatPackaging(row["shipment_packaging"])
             ]);
         });
         console.timeEnd("⏳ Calculation Smart Scan & Prep");
@@ -327,7 +355,8 @@ const uploadCalculationReport = async (req, res) => {
                 apr_sky_blue, apr_dark_blue, apr_brown, apr_green, apr_tan, apr_black, apr_red, apr_grey, 
                 weight, total_weight, hsn, gst, cost, 
                 ref_sku, ref_title, tra_qty, quantity, available_qty, ixd_fulfilment_id, warehouse_fulfilment_id, 
-                sale_total, sale_wh, ship_wh, sum_val, final_wh
+                sale_total, sale_wh, ship_wh, sum_val, final_wh,
+                mrp, fnsku, packing_dimension_length, packing_dimension_width, packing_dimension_height, packing_dimension_unit, shipment_packaging
             ) VALUES ?
         `;
 
@@ -429,10 +458,10 @@ const editCalculationRow = async (req, res) => {
 // =======================================================
 const deleteCalculationRow = async (req, res) => {
     try {
-        const { itemId } = req.params; // ID URL param se aayegi
+        const { id } = req.params; // ID URL param se aayegi
         const connection = await db.getConnection();
 
-        await connection.query(`DELETE FROM shipment_calculation_items WHERE id=?`, [itemId]);
+        await connection.query(`DELETE FROM shipment_calculation_items WHERE id=?`, [id]);
         connection.release();
         return successResponse(res, "Row deleted successfully!", null, 200);
     } catch (error) {
@@ -449,16 +478,25 @@ const deleteCalculationRow = async (req, res) => {
 const getCalculationData = async (req, res) => {
     let connection;
     try {
-        const { marketplace_id } = req.query;
+        const { marketplace_id, planId } = req.query;
         connection = await db.getConnection();
 
-        // Sabse recent master plan (top cards data) nikal rahe hain, with optional marketplace filter
+        // Sabse recent master plan (top cards data) nikal rahe hain, with optional marketplace/planId filter
         let masterQuery = `SELECT * FROM shipment_calculations_master`;
         let masterParams = [];
+        let whereClauses = [];
         
+        if (planId) {
+            whereClauses.push(`id = ?`);
+            masterParams.push(planId);
+        }
         if (marketplace_id) {
-            masterQuery += ` WHERE marketplace_id = ?`;
+            whereClauses.push(`marketplace_id = ?`);
             masterParams.push(marketplace_id);
+        }
+
+        if (whereClauses.length > 0) {
+            masterQuery += ` WHERE ` + whereClauses.join(` AND `);
         }
         
         masterQuery += ` ORDER BY created_at DESC LIMIT 1`;
