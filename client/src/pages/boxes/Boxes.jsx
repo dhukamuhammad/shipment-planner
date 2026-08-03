@@ -112,6 +112,8 @@ const Boxes = () => {
         fetchData();
     }, []);
 
+    const shipmentMode = localStorage.getItem('shipment_mode') || 'IXD';
+
     const displayData = useMemo(() => {
         const afsDays = Number(masterData.afs_days) || 0;
         const shipmentPlanDays = Number(masterData.shipment_plan_days) || 0;
@@ -178,11 +180,28 @@ const Boxes = () => {
             }
             const displaySuggestFinalWh = item.is_manual_suggest_final_wh ? item.suggest_final_wh : suggestFinalWh;
 
-            let val = 0;
-            if (item.stock_alloc && item.stock_alloc.includes(' / ')) {
-                val = Number(item.stock_alloc.split(' / ')[1]);
+            let quantity = 0;
+            if (shipmentMode === 'FC') {
+                let fcBreakdown = null;
+                try {
+                    if (item.fc_breakdown) {
+                        fcBreakdown = typeof item.fc_breakdown === 'string' ? JSON.parse(item.fc_breakdown) : item.fc_breakdown;
+                    }
+                } catch(e){}
+
+                if (fcBreakdown) {
+                    Object.values(fcBreakdown).forEach(data => {
+                        const val = useSuggestedWh ? Number(data.suggest_final_wh || 0) : (data.final_wh !== undefined && data.final_wh !== "" ? Number(data.final_wh) : Number(data.suggest_final_wh || 0));
+                        if (val > 0) quantity += val;
+                    });
+                }
+            } else {
+                let val = 0;
+                if (item.stock_alloc && typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / ')) {
+                    val = Number(item.stock_alloc.split(' / ')[1]);
+                }
+                quantity = (val > 0) ? val : 0;
             }
-            const quantity = (val > 0) ? val : 0;
 
             return { ...item, display_quantity: quantity };
         });
@@ -224,8 +243,6 @@ const Boxes = () => {
             bigLimit: bigLimit || defaultLimit 
         };
     };
-
-    const shipmentMode = masterData?.shipment_mode || 'IXD';
 
     const packingResult = useMemo(() => {
         if (!displayData || displayData.length === 0) return { type: 'single', data: { bags: [], summary: null } };
@@ -357,7 +374,7 @@ const Boxes = () => {
 
                 if (fcBreakdown) {
                     Object.entries(fcBreakdown).forEach(([fc, data]) => {
-                        const finalWh = data.final_wh !== undefined && data.final_wh !== "" ? Number(data.final_wh) : Number(data.suggest_final_wh || 0);
+                        const finalWh = useSuggestedWh ? Number(data.suggest_final_wh || 0) : (data.final_wh !== undefined && data.final_wh !== "" ? Number(data.final_wh) : Number(data.suggest_final_wh || 0));
                         if (finalWh > 0) {
                             if (!fcGroups[fc]) fcGroups[fc] = [];
                             fcGroups[fc].push({
@@ -373,11 +390,31 @@ const Boxes = () => {
             });
 
             const packedFCs = {};
+            let grandTotalBags = 0;
+            let grandTotalWeight = 0;
+            let grandTotalPieces = 0;
+            
             Object.keys(fcGroups).forEach(fc => {
-                packedFCs[fc] = packGroup(fcGroups[fc]);
+                const result = packGroup(fcGroups[fc]);
+                packedFCs[fc] = result;
+                if (result.summary) {
+                    grandTotalBags += result.summary.totalBags;
+                    grandTotalWeight += result.summary.totalWeight;
+                    grandTotalPieces += result.summary.totalPieces;
+                }
             });
 
-            return { type: 'multi', data: packedFCs };
+            return { 
+                type: 'multi', 
+                data: packedFCs,
+                grandSummary: {
+                    totalFcs: Object.keys(packedFCs).length,
+                    totalBags: grandTotalBags,
+                    totalWeight: grandTotalWeight,
+                    totalPieces: grandTotalPieces,
+                    totalSkus: validItems.length
+                }
+            };
         } else {
             return { type: 'single', data: packGroup(validItems) };
         }
@@ -591,8 +628,34 @@ const Boxes = () => {
                             </div>
                         </div>
                     ) : (
-                        Object.entries(packingResult.data).map(([fc, result]) => (
-                            <div key={fc} className="flex flex-col gap-4 bg-[#F9FAFB] border border-[#D9DDE5] p-4 rounded-[8px]">
+                        <div className="flex flex-col gap-8">
+                            {/* Grand Summary Card for Multi-FC */}
+                            <div className="bg-[#F8F9FA] border-2 border-[#5A5DF6]/30 rounded-[8px] shadow-sm px-5 py-4 flex flex-wrap gap-8 items-center">
+                                <div>
+                                    <p className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Total Warehouses</p>
+                                    <p className="text-xl font-black text-[#5A5DF6]">{packingResult.grandSummary.totalFcs}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Grand Total Bags</p>
+                                    <p className="text-xl font-black text-[#1C2340]">{packingResult.grandSummary.totalBags}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Total Shipment Weight</p>
+                                    <p className="text-sm font-bold text-[#1C2340] mt-1">{packingResult.grandSummary.totalWeight.toFixed(2)} kg</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Total Pieces</p>
+                                    <p className="text-sm font-bold text-[#1C2340] mt-1">{packingResult.grandSummary.totalPieces}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Total SKUs</p>
+                                    <p className="text-sm font-bold text-[#1C2340] mt-1">{packingResult.grandSummary.totalSkus}</p>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col gap-6">
+                                {Object.entries(packingResult.data).map(([fc, result]) => (
+                                    <div key={fc} className="flex flex-col gap-4 bg-[#F9FAFB] border border-[#D9DDE5] p-4 rounded-[8px]">
                                 <h2 className="text-lg font-bold text-[#1C2340] flex items-center gap-2 border-b border-[#D9DDE5] pb-2">
                                     <Truck size={18} className="text-[#5A5DF6]" />
                                     {fc}
@@ -625,7 +688,9 @@ const Boxes = () => {
                                     ))}
                                 </div>
                             </div>
-                        ))
+                                ))}
+                            </div>
+                        </div>
                     )}
                 </div>
             )}

@@ -526,6 +526,10 @@ const Calculation = () => {
             if (topMenuRef.current && !topMenuRef.current.contains(event.target)) {
                 setIsTopMenuOpen(false);
             }
+            // Close row action menu if click is outside any action menu dropdown
+            if (!event.target.closest('.row-action-menu-container')) {
+                setOpenMenuRowId(null);
+            }
         };
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -1557,10 +1561,6 @@ const Calculation = () => {
                     </button>
 
 
-                    <button onClick={() => setIsUploadModalOpen(true)} title="Upload File" className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#D9DDE5] rounded-[4px] text-[11px] font-semibold text-[#1C2340] hover:bg-[#F4F5F7] shadow-sm transition-all">
-                        <Upload size={12} className="text-[#5A5DF6]" /> Upload
-                    </button>
-                    <div className="hidden md:block w-px h-4 bg-[#D9DDE5] mx-0.5"></div>
                     <div className="relative" ref={downloadDropdownRef}>
                         <button
                             onClick={() => setIsDownloadDropdownOpen(!isDownloadDropdownOpen)}
@@ -1676,6 +1676,12 @@ const Calculation = () => {
                                     <div className={`w-2 h-2 rounded-full ${activeTab === 'inactive' ? 'bg-[#E74C3C]' : 'bg-transparent'}`}></div> Inactive
                                 </button>
                                 <div className="border-t border-[#D9DDE5] my-1"></div>
+                                <button
+                                    onClick={() => { setIsUploadModalOpen(true); setIsTopMenuOpen(false); }}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-[#1C2340] hover:bg-gray-50 flex items-center gap-2"
+                                >
+                                    <Upload size={12} className="text-[#5A5DF6]" /> Upload SKU
+                                </button>
                                 <button
                                     onClick={() => { setIsAddModalOpen(true); setIsTopMenuOpen(false); }}
                                     className="w-full text-left px-3 py-1.5 text-xs text-[#5A5DF6] hover:bg-gray-50 flex items-center gap-2 font-semibold"
@@ -1985,7 +1991,7 @@ const Calculation = () => {
                                                 <tr className={`group hover:bg-[#F4F5F7]/80 hover:z-10 relative transition-colors text-[#1C2340]/80 ${typeof activeText !== 'undefined' ? activeText : 'text-xs'} ${expandedRows[row.id] ? 'bg-blue-50/20' : ''}`}>
 
                                                     {/* Action Column Cell */}
-                                                    <td className="w-20 px-2 py-3 text-center bg-white border-r-2 border-[#D9DDE5] relative">
+                                                    <td className="w-20 px-2 py-3 text-center bg-white border-r-2 border-[#D9DDE5] relative row-action-menu-container">
                                                         <div className="flex items-center justify-between px-1 h-full">
                                                             <div className="flex items-center gap-1.5">
                                                                 <input
