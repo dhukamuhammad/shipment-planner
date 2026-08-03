@@ -730,6 +730,15 @@ const getCalculationData = async (req, res) => {
 
         const bunchQty = Number(masterData.bunch_qty) || 0;
 
+        // --- FETCH ACTIVE WAREHOUSES FOR FC MODE ---
+        let activeFCs = [];
+        if (shipmentMode === 'FC') {
+            if (masterData.marketplace_id) {
+                const [fcs] = await connection.query("SELECT name FROM ixd_warehouses WHERE type = 'Warehouse' AND marketplace_id = ? AND is_active = 1", [masterData.marketplace_id]);
+                activeFCs = fcs.map(f => f.name);
+            }
+        }
+
         // First Pass: Calculate basic values and group demands
         let groupDemandMap = {};
 
@@ -744,11 +753,7 @@ const getCalculationData = async (req, res) => {
             let fcBreakdownJSON = null;
             if (shipmentMode === 'FC') {
                 let fcBreakdown = {};
-                let fcs = new Set();
-                if (afsFcCurrentMap[item.sku]) Object.keys(afsFcCurrentMap[item.sku]).forEach(fc => fcs.add(fc));
-                if (afsFcAvgMap[item.sku]) Object.keys(afsFcAvgMap[item.sku]).forEach(fc => fcs.add(fc));
-                if (dihFcMap[item.sku]) Object.keys(dihFcMap[item.sku]).forEach(fc => fcs.add(fc));
-                if (transitFcMap[item.sku]) Object.keys(transitFcMap[item.sku]).forEach(fc => fcs.add(fc));
+                let fcs = activeFCs;
 
                 fcs.forEach(fc => {
                     const fcSaleWh = (afsFcCurrentMap[item.sku] && afsFcCurrentMap[item.sku][fc]) ? afsFcCurrentMap[item.sku][fc] : 0;

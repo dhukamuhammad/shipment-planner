@@ -225,6 +225,8 @@ const Boxes = () => {
         };
     };
 
+    const shipmentMode = masterData?.shipment_mode || 'IXD';
+
     const packingResult = useMemo(() => {
         if (!displayData || displayData.length === 0) return { type: 'single', data: { bags: [], summary: null } };
 
@@ -355,7 +357,7 @@ const Boxes = () => {
 
                 if (fcBreakdown) {
                     Object.entries(fcBreakdown).forEach(([fc, data]) => {
-                        const finalWh = data.final_wh !== undefined ? data.final_wh : data.calculated_final_wh;
+                        const finalWh = data.final_wh !== undefined && data.final_wh !== "" ? Number(data.final_wh) : Number(data.suggest_final_wh || 0);
                         if (finalWh > 0) {
                             if (!fcGroups[fc]) fcGroups[fc] = [];
                             fcGroups[fc].push({

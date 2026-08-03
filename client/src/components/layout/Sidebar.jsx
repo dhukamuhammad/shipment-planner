@@ -72,13 +72,13 @@ const Sidebar = () => {
                     <span className="font-medium text-sm">Settings</span>
                 </NavLink>
 
-                <NavLink
+                {/* <NavLink
                     to="/logout"
                     className="flex items-center px-3 py-2.5 text-[#E74C3C] hover:bg-[#E74C3C]/8 rounded-[5px] transition-all"
                 >
                     <LogOut size={17} className="mr-3" />
                     <span className="font-medium text-sm">Logout</span>
-                </NavLink>
+                </NavLink> */}
 
             </div>
         </div>

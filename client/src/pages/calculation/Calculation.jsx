@@ -454,6 +454,7 @@ const Calculation = () => {
     const [activeTab, setActiveTab] = useState('active');
     const [openMenuRowId, setOpenMenuRowId] = useState(null);
     const [isTopMenuOpen, setIsTopMenuOpen] = useState(false);
+    const topMenuRef = useRef(null);
     const [editingSuggestWh, setEditingSuggestWh] = useState(null);
 
     // --- Custom History Dropdown States ---
@@ -521,6 +522,9 @@ const Calculation = () => {
             }
             if (downloadDropdownRef.current && !downloadDropdownRef.current.contains(event.target)) {
                 setIsDownloadDropdownOpen(false);
+            }
+            if (topMenuRef.current && !topMenuRef.current.contains(event.target)) {
+                setIsTopMenuOpen(false);
             }
         };
         document.addEventListener("mousedown", handleClickOutside);
@@ -840,10 +844,32 @@ const Calculation = () => {
             const _multiplier = extractMultiplier(item.sku, item.title);
             const saleWh = Number(item.sale_wh) || 0;
             const availableQty = Number(item.available_qty) || 0;
+            const saleWhAvg = Number(item.sale_wh_avg) || 0;
 
             let shipWh = 0;
-            if (afsDays > 0) {
-                shipWh = Math.ceil(((saleWh / afsDays) * shipmentPlanDays) - availableQty);
+            let suggestedShipWh = 0;
+            
+            if (item.fc_breakdown && typeof item.fc_breakdown === 'object' && Object.keys(item.fc_breakdown).length > 0) {
+                let fcShipWhSum = 0;
+                let fcSuggestedShipWhSum = 0;
+                Object.values(item.fc_breakdown).forEach(fc => {
+                    const fcSaleWh = Number(fc.sale_wh) || 0;
+                    const fcSaleWhAvg = Number(fc.sale_wh_avg) || 0;
+                    const fcAvail = Number(fc.available_qty) || 0;
+                    if (afsDays > 0) {
+                        const fcShip = Math.ceil(((fcSaleWh / afsDays) * shipmentPlanDays) - fcAvail);
+                        if (fcShip > 0) fcShipWhSum += fcShip;
+                        const fcSugShip = Math.ceil(((fcSaleWhAvg / afsDays) * shipmentPlanDays) - fcAvail);
+                        if (fcSugShip > 0) fcSuggestedShipWhSum += fcSugShip;
+                    }
+                });
+                shipWh = fcShipWhSum;
+                suggestedShipWh = fcSuggestedShipWhSum;
+            } else {
+                if (afsDays > 0) {
+                    shipWh = Math.ceil(((saleWh / afsDays) * shipmentPlanDays) - availableQty);
+                    suggestedShipWh = Math.ceil(((saleWhAvg / afsDays) * shipmentPlanDays) - availableQty);
+                }
             }
 
             let intWh = "";
@@ -887,11 +913,7 @@ const Calculation = () => {
                 totalWeight = Number(displayFinalWh) * weight;
             }
 
-            const saleWhAvg = Number(item.sale_wh_avg) || 0;
-            let suggestedShipWh = 0;
-            if (afsDays > 0) {
-                suggestedShipWh = Math.ceil(((saleWhAvg / afsDays) * shipmentPlanDays) - availableQty);
-            }
+            // suggestedShipWh already calculated above based on fc_breakdown logic
 
             let sugIntWh = "";
             if (!isNaN(suggestedShipWh)) {
@@ -1557,9 +1579,21 @@ const Calculation = () => {
                                         filteredData.forEach(item => {
                                             if (shipmentMode === 'FC' && item.fc_breakdown) {
                                                 // Group by FC
-                                                Object.entries(item.fc_breakdown).forEach(([fc, data]) => {
-                                                    const finalWh = data.final_wh !== undefined ? data.final_wh : data.calculated_final_wh;
-                                                    if (finalWh > 0) {
+                                                let parsedFcBreakdown = {};
+                                                try {
+                                                    parsedFcBreakdown = typeof item.fc_breakdown === 'string' ? JSON.parse(item.fc_breakdown) : item.fc_breakdown;
+                                                    if (typeof parsedFcBreakdown === 'string') {
+                                                        parsedFcBreakdown = JSON.parse(parsedFcBreakdown); // double parse in case of double stringified
+                                                    }
+                                                } catch(e) {
+                                                    console.error("Parse error for sku:", item.sku, e);
+                                                }
+                                                console.log("manifest sku:", item.sku, "fc_breakdown orig:", item.fc_breakdown, "parsed:", parsedFcBreakdown);
+                                                
+                                                if (parsedFcBreakdown && typeof parsedFcBreakdown === 'object') {
+                                                    Object.entries(parsedFcBreakdown).forEach(([fc, data]) => {
+                                                        const finalWh = data.final_wh !== undefined && data.final_wh !== "" ? Number(data.final_wh) : Number(data.suggest_final_wh || 0);
+                                                        if (finalWh > 0) {
                                                         manifestSkus.push({
                                                             sku: item.sku,
                                                             quantity: finalWh,
@@ -1576,6 +1610,7 @@ const Calculation = () => {
                                                         });
                                                     }
                                                 });
+                                                }
                                             } else {
                                                 let qty = 0;
                                                 if (item.stock_alloc && item.stock_alloc.includes(' / ')) {
@@ -1618,7 +1653,7 @@ const Calculation = () => {
                         )}
                     </div>
 
-                    <div className="relative">
+                    <div className="relative" ref={topMenuRef}>
                         <button
                             onClick={() => setIsTopMenuOpen(!isTopMenuOpen)}
                             className="p-1.5 text-[#1C2340]/60 hover:text-[#1C2340] hover:bg-gray-100 rounded border border-[#D9DDE5] transition-colors bg-white shadow-sm"
@@ -1745,7 +1780,7 @@ const Calculation = () => {
 
                                 {/* 🔥 COLGROUP */}
                                 <colgroup>
-                                    <col style={{ width: 64 }} />
+                                    <col style={{ width: 80, minWidth: 80, maxWidth: 80 }} />
 
                                     {productSpan > 0 && (collapsedGroups.product ? <col style={{ width: 40 }} /> : <>
                                         {visibleColumns.group_name && <col ref={el => colRefs.current.group_name = el} style={{ width: colWidthsRef.current.group_name }} />}
@@ -1800,7 +1835,7 @@ const Calculation = () => {
                                 <thead className="sticky top-0 z-20 shadow-sm bg-white">
                                     {/* Top Row - Grouped Headers */}
                                     <tr className={`${typeof activeHead !== 'undefined' ? activeHead : 'text-[10px]'} font-bold text-[#1C2340]/60 uppercase tracking-wider border-b border-[#D9DDE5]`}>
-                                        <th rowSpan={2} className="w-16 px-2 py-3 bg-[#1C2340]/5 border-r-2 border-[#D9DDE5] align-bottom text-center text-[#1C2340]/50 relative">
+                                        <th rowSpan={2} className="w-20 px-2 py-3 bg-[#1C2340]/5 border-r-2 border-[#D9DDE5] align-bottom text-center text-[#1C2340]/50 relative">
                                             <div className="flex items-end justify-between px-1 h-full pb-1">
                                                 <input
                                                     type="checkbox"
@@ -1950,7 +1985,7 @@ const Calculation = () => {
                                                 <tr className={`group hover:bg-[#F4F5F7]/80 hover:z-10 relative transition-colors text-[#1C2340]/80 ${typeof activeText !== 'undefined' ? activeText : 'text-xs'} ${expandedRows[row.id] ? 'bg-blue-50/20' : ''}`}>
 
                                                     {/* Action Column Cell */}
-                                                    <td className="w-16 px-2 py-3 text-center bg-white border-r-2 border-[#D9DDE5] relative">
+                                                    <td className="w-20 px-2 py-3 text-center bg-white border-r-2 border-[#D9DDE5] relative">
                                                         <div className="flex items-center justify-between px-1 h-full">
                                                             <div className="flex items-center gap-1.5">
                                                                 <input
@@ -2213,7 +2248,7 @@ const Calculation = () => {
                                                             <table className="w-full text-left text-xs text-[#1C2340]/80" style={{ tableLayout: 'fixed' }}>
                                                                 <colgroup>
                                                                     {/* Duplicate the exact colgroup from parent to maintain perfect alignment */}
-                                                                    <col style={{ width: 64 }} />
+                                                                    <col style={{ width: 80, minWidth: 80, maxWidth: 80 }} />
                                                                     {collapsedGroups.product ? <col style={{ width: 40 }} /> : (
                                                                         <>
                                                                             {visibleColumns.group_name && <col style={{ width: colWidthsRef.current.group_name }} />}
@@ -2340,7 +2375,7 @@ const Calculation = () => {
                                                                                                         <span className="text-[#1C2340]/60 mx-1">/</span>
                                                                                                         <span className={
                                                                                                             data.fc_demand > 0 && (Number(data.stock_alloc.split(' / ')[1]) / data.fc_demand) >= 1 ? 'text-[#22B573] text-xs font-bold' :
-                                                                                                            data.fc_demand > 0 ? 'text-[#E74C3C] text-xs font-bold' : 'text-[#1C2340] text-xs font-bold'
+                                                                                                                data.fc_demand > 0 ? 'text-[#E74C3C] text-xs font-bold' : 'text-[#1C2340] text-xs font-bold'
                                                                                                         }>
                                                                                                             {data.stock_alloc.split(' / ')[1]}
                                                                                                         </span>
@@ -2358,7 +2393,7 @@ const Calculation = () => {
                                                                                                         <span className="text-[#1C2340]/60 mx-1">/</span>
                                                                                                         <span className={
                                                                                                             data.fc_demand > 0 && (Number(data.stock_alloc.split(' / ')[1]) / data.fc_demand) >= 1 ? 'text-[#22B573]' :
-                                                                                                            data.fc_demand > 0 ? 'text-[#E74C3C]' : 'text-[#1C2340]'
+                                                                                                                data.fc_demand > 0 ? 'text-[#E74C3C]' : 'text-[#1C2340]'
                                                                                                         }>
                                                                                                             {data.stock_alloc.split(' / ')[1]}
                                                                                                         </span>
