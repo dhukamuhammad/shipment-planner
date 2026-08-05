@@ -181,8 +181,13 @@ const Calculation = () => {
             }
 
             const params = { _t: Date.now() };
-            if (urlPlanId) params.planId = urlPlanId;
-            else if (selectedHistoryPlanId) params.planId = selectedHistoryPlanId;
+            if (urlPlanId) {
+                params.planId = urlPlanId;
+            } else if (canAutoLoad) {
+                // Do not send planId; let backend auto-load Draft or auto-clone
+            } else if (selectedHistoryPlanId) {
+                params.planId = selectedHistoryPlanId;
+            }
 
             if (filterMarketplaceId) params.marketplace_id = filterMarketplaceId;
             params.shipment_mode = localStorage.getItem('shipment_mode') || 'IXD';
@@ -192,24 +197,24 @@ const Calculation = () => {
                 // Backend se Master aur Items alag alag aayenge
                 if (response.data.data.master) {
                     setMasterData(response.data.data.master);
-
-                    // RE-FETCH HISTORY TO SYNC DROPDOWN
-                    if (filterMarketplaceId) {
-                        try {
-                            const historyRes = await api.get('/history', { params: { marketplace_id: filterMarketplaceId } });
-                            if (historyRes.data?.success) {
-                                setHistoryPlans(historyRes.data.data);
-                                // Select the newly created plan in the dropdown
-                                if (canAutoLoad) {
-                                    handlePlanChange(response.data.data.master.id);
-                                }
-                            }
-                        } catch (e) {
-                            console.error("Failed to sync history", e);
-                        }
-                    }
                 } else {
                     setMasterData({});
+                }
+
+                // RE-FETCH HISTORY TO SYNC DROPDOWN
+                if (filterMarketplaceId) {
+                    try {
+                        const historyRes = await api.get('/history', { params: { marketplace_id: filterMarketplaceId } });
+                        if (historyRes.data?.success) {
+                            setHistoryPlans(historyRes.data.data);
+                            // Select the newly created plan in the dropdown
+                            if (canAutoLoad && response.data.data.master) {
+                                handlePlanChange(response.data.data.master.id);
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Failed to sync history", e);
+                    }
                 }
                 const fetchedItems = response.data.data.items || [];
                 const parsedItems = fetchedItems.map(item => {
@@ -1215,6 +1220,7 @@ const Calculation = () => {
     }, [filteredData, masterData]);
 
     const totalToShip = React.useMemo(() => {
+        const hasStockAllocation = filteredData.some(item => typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / '));
         return filteredData.reduce((total, item) => {
             let val = 0;
             if (shipmentMode === 'FC' && item.fc_breakdown) {
@@ -1228,12 +1234,12 @@ const Calculation = () => {
                 val = Number(item.final_wh);
             }
 
-            if (typeof item.stock_alloc === 'string') {
-                if (item.stock_alloc.includes(' / ')) {
+            if (hasStockAllocation) {
+                if (typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / ')) {
                     const alloc = Number(item.stock_alloc.split(' / ')[1]);
                     if (!isNaN(alloc)) val = alloc;
                 } else {
-                    val = 0; // Empty stock_alloc means 0 allocated
+                    val = 0; // Empty or null stock_alloc in Stock Mode means 0 allocated
                 }
             }
 
@@ -1242,6 +1248,7 @@ const Calculation = () => {
     }, [filteredData, shipmentMode]);
 
     const totalToSuggestShip = React.useMemo(() => {
+        const hasStockAllocation = filteredData.some(item => typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / '));
         return filteredData.reduce((total, item) => {
             let val = 0;
             if (shipmentMode === 'FC' && item.fc_breakdown) {
@@ -1255,12 +1262,12 @@ const Calculation = () => {
                 val = Number(item.suggest_final_wh);
             }
 
-            if (typeof item.stock_alloc === 'string') {
-                if (item.stock_alloc.includes(' / ')) {
+            if (hasStockAllocation) {
+                if (typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / ')) {
                     const alloc = Number(item.stock_alloc.split(' / ')[1]);
                     if (!isNaN(alloc)) val = alloc;
                 } else {
-                    val = 0; // Empty stock_alloc means 0 allocated
+                    val = 0; // Empty or null stock_alloc in Stock Mode means 0 allocated
                 }
             }
 

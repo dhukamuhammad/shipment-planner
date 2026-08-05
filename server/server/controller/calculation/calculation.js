@@ -60,7 +60,7 @@ const uploadCalculationReport = async (req, res) => {
 
         // 2. Check if appending to an existing plan
         let planId = req.body.planId;
-        
+
         if (!planId) {
             // Create Master entry for Top Cards
             const [masterResult] = await connection.query(
@@ -83,7 +83,7 @@ const uploadCalculationReport = async (req, res) => {
         } else {
             const workbook = new ExcelJS.Workbook();
             await workbook.xlsx.readFile(req.file.path);
-            
+
             // Extract from IXD and Warehouse
             workbook.eachSheet((worksheet) => {
                 const wsName = worksheet.name ? worksheet.name.toLowerCase().trim() : '';
@@ -141,7 +141,7 @@ const uploadCalculationReport = async (req, res) => {
                     }
                 });
             }
-            
+
             // Insert parsed warehouses into DB
             if (ixdWarehouses.length > 0) {
                 for (let wh of ixdWarehouses) {
@@ -253,7 +253,7 @@ const uploadCalculationReport = async (req, res) => {
             if (!req.body.planId) await connection.query("DELETE FROM shipment_calculations_master WHERE id = ?", [planId]);
             await connection.query("DELETE FROM uploaded_reports WHERE id = ?", [reportId]);
             await connection.commit();
-            
+
             if (ixdWarehouses.length > 0 || regularWarehouses.length > 0) {
                 connection.release();
                 return successResponse(res, "Warehouses updated successfully. No calculation data found.", {
@@ -268,13 +268,13 @@ const uploadCalculationReport = async (req, res) => {
         // --- STEP 4: PREPARE BULK VALUES FOR DB ---
         const ixdFulfilmentJSON = ixdWarehouses && ixdWarehouses.length > 0 ? JSON.stringify(ixdWarehouses) : null;
         const whFulfilmentJSON = regularWarehouses && regularWarehouses.length > 0 ? JSON.stringify(regularWarehouses) : null;
-        
+
         const formatPackaging = (val) => {
             if (!val) return null;
-            try { 
-                JSON.parse(val); 
-                return val; 
-            } catch(e) {}
+            try {
+                JSON.parse(val);
+                return val;
+            } catch (e) { }
             const parts = val.toString().split('|').map(p => p.trim()).filter(Boolean);
             if (parts.length === 0) return null;
             return JSON.stringify(parts.map(p => {
@@ -443,7 +443,7 @@ const editCalculationRow = async (req, res) => {
             `UPDATE shipment_calculation_items 
              SET group_name=?, sku=?, title=?, category=?, hsn=?, gst=?, cost=?, weight=?, is_active=?, ref_sku=?, ref_title=?
              WHERE id=?`,
-            [groupName, sku, title, category, hsn, gst, cost, weight, isActive !== undefined ? isActive : 1, sku, title, itemId] 
+            [groupName, sku, title, category, hsn, gst, cost, weight, isActive !== undefined ? isActive : 1, sku, title, itemId]
         );
         connection.release();
         return successResponse(res, "Row updated successfully!", null, 200);
@@ -478,14 +478,15 @@ const deleteCalculationRow = async (req, res) => {
 const getCalculationData = async (req, res) => {
     let connection;
     try {
-        const { marketplace_id, planId } = req.query;
+        const { marketplace_id, planId, shipment_mode } = req.query;
+        const shipmentMode = shipment_mode || 'IXD';
         connection = await db.getConnection();
 
         // Sabse recent master plan (top cards data) nikal rahe hain, with optional marketplace/planId filter
         let masterQuery = `SELECT * FROM shipment_calculations_master`;
         let masterParams = [];
         let whereClauses = [];
-        
+
         if (planId) {
             whereClauses.push(`id = ?`);
             masterParams.push(planId);
@@ -498,7 +499,7 @@ const getCalculationData = async (req, res) => {
         if (whereClauses.length > 0) {
             masterQuery += ` WHERE ` + whereClauses.join(` AND `);
         }
-        
+
         masterQuery += ` ORDER BY created_at DESC LIMIT 1`;
 
         const [masterRows] = await connection.query(masterQuery, masterParams);
@@ -524,7 +525,7 @@ const getCalculationData = async (req, res) => {
             FROM uploaded_reports
             WHERE report_type IN ('AFS', 'Business', 'DIH') AND status = 'Success'
         `);
-        
+
         const [latestTransitReport] = await connection.query(`
             SELECT id, uploaded_at FROM uploaded_reports WHERE report_type = 'Transit Shipment' AND status = 'Success' ORDER BY uploaded_at DESC LIMIT 1
         `);
@@ -540,7 +541,7 @@ const getCalculationData = async (req, res) => {
                     latestTransitId = latestTransitReport[0].id;
                 }
             } else {
-                 latestTransitId = latestTransitReport[0].id; // Fallback if no other reports exist
+                latestTransitId = latestTransitReport[0].id; // Fallback if no other reports exist
             }
         }
 
@@ -557,6 +558,18 @@ const getCalculationData = async (req, res) => {
             transitQtyMap[r.merchant_sku] = r.total_qty;
         });
 
+        let transitFcMap = {};
+        if (latestTransitId && shipmentMode === 'FC') {
+            const [transitFcRows] = await connection.query(
+                `SELECT merchant_sku, fc, SUM(quantity) as total_qty FROM transit_shipment_data WHERE report_id = ? GROUP BY merchant_sku, fc`,
+                [latestTransitId]
+            );
+            transitFcRows.forEach(r => {
+                if (!transitFcMap[r.merchant_sku]) transitFcMap[r.merchant_sku] = {};
+                transitFcMap[r.merchant_sku][r.fc] = r.total_qty;
+            });
+        }
+
         // DIH report se SKU-wise total Ending Warehouse Balance nikal rahe hain (Quantity column ke liye)
         const [dihRows] = await connection.query(
             `SELECT msku, SUM(ending_warehouse_balance) as total_ending_balance FROM dih_data GROUP BY msku`
@@ -565,6 +578,17 @@ const getCalculationData = async (req, res) => {
         dihRows.forEach((r) => {
             dihQtyMap[r.msku] = r.total_ending_balance;
         });
+
+        let dihFcMap = {};
+        if (shipmentMode === 'FC') {
+            const [dihFcRows] = await connection.query(
+                `SELECT msku, location as fc, SUM(ending_warehouse_balance) as total_ending_balance FROM dih_data GROUP BY msku, location`
+            );
+            dihFcRows.forEach(r => {
+                if (!dihFcMap[r.msku]) dihFcMap[r.msku] = {};
+                dihFcMap[r.msku][r.fc] = r.total_ending_balance;
+            });
+        }
 
         // Get latest DIH report ID for linking
         const [latestDihReport] = await connection.query(`
@@ -582,7 +606,7 @@ const getCalculationData = async (req, res) => {
         });
 
         // --- Naya AFS Logic: Current Month aur 4-Month Avg ke liye ---
-        
+
         // 1. Sabse pehle latest AFS report nikalte hain (Current Month 'Sale-WH' ke liye)
         const [latestAfsReport] = await connection.query(`
             SELECT report_id as id, MAX(shipment_date) as max_date 
@@ -592,8 +616,9 @@ const getCalculationData = async (req, res) => {
             ORDER BY max_date DESC 
             LIMIT 1
         `);
-        
+
         let afsCurrentQtyMap = {};
+        let afsFcCurrentMap = {};
         if (latestAfsReport.length > 0) {
             const latestAfsId = latestAfsReport[0].id;
 
@@ -617,6 +642,18 @@ const getCalculationData = async (req, res) => {
             afsCurrentRows.forEach((r) => {
                 afsCurrentQtyMap[r.merchant_sku] = r.total_shipped_qty;
             });
+
+            // FC-wise Data for Multi-FC
+            if (shipmentMode === 'FC') {
+                const [afsFcCurrentRows] = await connection.query(
+                    `SELECT merchant_sku, fc, SUM(shipped_quantity) as total_shipped_qty FROM afs_data WHERE report_id = ? GROUP BY merchant_sku, fc`,
+                    [latestAfsId]
+                );
+                afsFcCurrentRows.forEach(r => {
+                    if (!afsFcCurrentMap[r.merchant_sku]) afsFcCurrentMap[r.merchant_sku] = {};
+                    afsFcCurrentMap[r.merchant_sku][r.fc] = r.total_shipped_qty;
+                });
+            }
         }
 
         // Override the database value so frontend receives the exact calculated days
@@ -634,6 +671,18 @@ const getCalculationData = async (req, res) => {
             afsAvgQtyMap[r.merchant_sku] = r.total_qty / count;
         });
 
+        let afsFcAvgMap = {};
+        if (shipmentMode === 'FC') {
+            const [afsFcAvgRows] = await connection.query(
+                `SELECT merchant_sku, fc, SUM(shipped_quantity) as total_qty, COUNT(DISTINCT report_id) as month_count FROM afs_data GROUP BY merchant_sku, fc`
+            );
+            afsFcAvgRows.forEach(r => {
+                const count = r.month_count > 0 ? r.month_count : 1;
+                if (!afsFcAvgMap[r.merchant_sku]) afsFcAvgMap[r.merchant_sku] = {};
+                afsFcAvgMap[r.merchant_sku][r.fc] = r.total_qty / count;
+            });
+        }
+
         // Master ke afs_days aur shipment_plan_days nikal rahe hain (Ship-WH formula ke liye)
         const afsDays = Number(masterData.afs_days) || 0;
         const shipmentPlanDays = Number(masterData.shipment_plan_days) || 0;
@@ -642,7 +691,7 @@ const getCalculationData = async (req, res) => {
         const [latestStockReport] = await connection.query(`
             SELECT id FROM uploaded_reports WHERE report_type = 'Stock' AND status = 'Success' AND marketplace_id = ? ORDER BY uploaded_at DESC LIMIT 1
         `, [masterData.marketplace_id]);
-        
+
         const latestStockId = latestStockReport.length > 0 ? latestStockReport[0].id : null;
         let stockAvailableMap = {};
         if (latestStockId) {
@@ -651,7 +700,7 @@ const getCalculationData = async (req, res) => {
                 [latestStockId]
             );
             stockRows.forEach((r) => {
-                if(r.group_name) {
+                if (r.group_name) {
                     stockAvailableMap[r.group_name.trim().toLowerCase()] = r.total_available;
                 }
             });
@@ -681,17 +730,69 @@ const getCalculationData = async (req, res) => {
 
         const bunchQty = Number(masterData.bunch_qty) || 0;
 
+        // --- FETCH ACTIVE WAREHOUSES FOR FC MODE ---
+        let activeFCs = [];
+        if (shipmentMode === 'FC') {
+            if (masterData.marketplace_id) {
+                const [fcs] = await connection.query("SELECT name FROM ixd_warehouses WHERE type = 'Warehouse' AND marketplace_id = ? AND is_active = 1", [masterData.marketplace_id]);
+                activeFCs = fcs.map(f => f.name);
+            }
+        }
+
         // First Pass: Calculate basic values and group demands
         let groupDemandMap = {};
-        
+
         let preliminaryItems = itemRows.map((item) => {
             const traQty = Number(transitQtyMap[item.sku]) || 0;
             const quantity = Number(dihQtyMap[item.sku]) || 0;
             const saleWh = Number(afsCurrentQtyMap[item.sku]) || 0;
             const saleWhAvg = Number(afsAvgQtyMap[item.sku]) || 0; // Historical 4-month total/avg
 
-            // 6. Pipeline Inventory: Available = Transit (Pipeline) + Current Warehouse Stock
             const availableQty = traQty + quantity;
+
+            let fcBreakdownJSON = null;
+            if (shipmentMode === 'FC') {
+                let fcBreakdown = {};
+                let fcs = activeFCs;
+
+                fcs.forEach(fc => {
+                    const fcSaleWh = (afsFcCurrentMap[item.sku] && afsFcCurrentMap[item.sku][fc]) ? afsFcCurrentMap[item.sku][fc] : 0;
+                    const fcSaleWhAvg = (afsFcAvgMap[item.sku] && afsFcAvgMap[item.sku][fc]) ? afsFcAvgMap[item.sku][fc] : 0;
+                    const fcDihQuantity = (dihFcMap[item.sku] && dihFcMap[item.sku][fc]) ? dihFcMap[item.sku][fc] : 0;
+                    const fcTraQuantity = (transitFcMap[item.sku] && transitFcMap[item.sku][fc]) ? transitFcMap[item.sku][fc] : 0;
+
+                    const fcAvailableQty = fcTraQuantity + fcDihQuantity;
+
+                    let fcShipWh = 0;
+                    if (afsDays > 0) {
+                        fcShipWh = Math.ceil(((fcSaleWh / afsDays) * shipmentPlanDays) - fcAvailableQty);
+                    }
+                    const fcDemand = Math.max(0, fcShipWh);
+
+                    let fcSuggestFinalWh = 0;
+                    if (afsDays > 0) {
+                        fcSuggestFinalWh = Math.ceil(((fcSaleWhAvg / afsDays) * shipmentPlanDays) - fcAvailableQty);
+                    }
+                    if (fcSuggestFinalWh < 0) fcSuggestFinalWh = 0;
+
+                    fcBreakdown[fc] = {
+                        tra_qty: fcTraQuantity,
+                        quantity: fcDihQuantity,
+                        available_qty: fcAvailableQty,
+                        sale_wh: fcSaleWh,
+                        sale_wh_avg: parseFloat(fcSaleWhAvg.toFixed(2)),
+                        suggest_final_wh: fcSuggestFinalWh,
+                        fc_demand: fcDemand,
+                        final_wh: "" // manual value
+                    };
+                });
+                if (Object.keys(fcBreakdown).length > 0) {
+                    fcBreakdownJSON = JSON.stringify(fcBreakdown);
+                }
+            }
+
+            // 6. Pipeline Inventory: Available = Transit (Pipeline) + Current Warehouse Stock
+            // (Moved up)
 
             let shipWh = 0;
 
@@ -711,7 +812,7 @@ const getCalculationData = async (req, res) => {
                     intWh = Math.floor(shipWh / bunchQty);
                     decWh = (shipWh / bunchQty) - intWh;
                 }
-                
+
                 if (shipWh > 0 && decWh !== "") {
                     calculatedFinalWh = (intWh * bunchQty) + (decWh > 0 ? bunchQty : 0);
                 }
@@ -763,7 +864,8 @@ const getCalculationData = async (req, res) => {
                 dec_wh: decWh,
                 final_wh: displayFinalWh,
                 suggest_final_wh: displaySuggestFinalWh,
-                _demand: Math.max(0, demand)
+                _demand: Math.max(0, demand),
+                fc_breakdown: fcBreakdownJSON
             };
         });
 
@@ -772,7 +874,7 @@ const getCalculationData = async (req, res) => {
             const grp = item.group_name ? item.group_name.trim().toLowerCase() : 'unknown';
             const totalAvailable = stockAvailableMap[grp] !== undefined ? Number(stockAvailableMap[grp]) : null;
             const totalDemand = groupDemandMap[grp] || 0;
-            
+
             let stock_alloc_qty = null;
             let finalSuggested = item.suggest_final_wh;
 
@@ -789,6 +891,25 @@ const getCalculationData = async (req, res) => {
                 }
             }
 
+            let updatedFcBreakdownJSON = item.fc_breakdown;
+            if (updatedFcBreakdownJSON) {
+                let fcBreakdown = JSON.parse(updatedFcBreakdownJSON);
+                Object.keys(fcBreakdown).forEach(fc => {
+                    let fcStockAlloc = null;
+                    if (totalAvailable !== null) {
+                        if (totalDemand === 0) {
+                            fcStockAlloc = 0;
+                        } else if (totalAvailable >= totalDemand) {
+                            fcStockAlloc = fcBreakdown[fc].fc_demand;
+                        } else {
+                            fcStockAlloc = Math.floor((fcBreakdown[fc].fc_demand / totalDemand) * totalAvailable);
+                        }
+                    }
+                    fcBreakdown[fc].stock_alloc = totalAvailable !== null ? `${totalAvailable} / ${fcStockAlloc}` : '';
+                });
+                updatedFcBreakdownJSON = JSON.stringify(fcBreakdown);
+            }
+
             // Clean up temporary fields
             delete item._demand;
 
@@ -796,14 +917,15 @@ const getCalculationData = async (req, res) => {
                 ...item,
                 stock_alloc: totalAvailable !== null ? `${totalAvailable} / ${stock_alloc_qty}` : '',
                 stock_alloc_ratio: totalAvailable !== null && item._demand > 0 ? (stock_alloc_qty / item._demand) : null,
-                suggest_final_wh: item.is_manual_suggest_final_wh ? item.suggest_final_wh : finalSuggested
+                suggest_final_wh: item.is_manual_suggest_final_wh ? item.suggest_final_wh : finalSuggested,
+                fc_breakdown: updatedFcBreakdownJSON
             };
         });
 
         // SAVE REPORT IDs IN MASTER DATA FOR SMART DELETE
         let latestAfsIdToSave = null;
         if (latestAfsReport && latestAfsReport.length > 0) latestAfsIdToSave = latestAfsReport[0].id;
-        
+
         await connection.query(
             `UPDATE shipment_calculations_master SET afs_report_id = ?, dih_report_id = ?, transit_report_id = ? WHERE id = ?`,
             [latestAfsIdToSave, latestDihId, latestTransitId, masterData.id]
@@ -819,8 +941,8 @@ const getCalculationData = async (req, res) => {
                     bgConnection = await db.getConnection();
                     for (const item of itemsWithTraQty) {
                         await bgConnection.query(
-                            `UPDATE shipment_calculation_items SET tra_qty=?, quantity=?, available_qty=?, sale_wh=?, sale_wh_avg=?, ship_wh=?, int_wh=?, dec_wh=?, final_wh=?, suggest_final_wh=?, stock_alloc=? WHERE id=?`,
-                            [item.tra_qty, item.quantity, item.available_qty, item.sale_wh, item.sale_wh_avg, item.ship_wh, item.int_wh, item.dec_wh || 0, item.final_wh || 0, item.suggest_final_wh || 0, item.stock_alloc || null, item.id]
+                            `UPDATE shipment_calculation_items SET tra_qty=?, quantity=?, available_qty=?, sale_wh=?, sale_wh_avg=?, ship_wh=?, int_wh=?, dec_wh=?, final_wh=?, suggest_final_wh=?, stock_alloc=?, fc_breakdown=? WHERE id=?`,
+                            [item.tra_qty, item.quantity, item.available_qty, item.sale_wh, item.sale_wh_avg, item.ship_wh, item.int_wh, item.dec_wh || 0, item.final_wh || 0, item.suggest_final_wh || 0, item.stock_alloc || null, item.fc_breakdown || null, item.id]
                         );
                     }
                 } catch (e) {

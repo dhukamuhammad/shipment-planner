@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Package, FileSpreadsheet, Upload, Loader2, X, UploadCloud, Scan, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Download, Package, FileSpreadsheet, Upload, Loader2, X, UploadCloud, Scan, Eye, EyeOff, AlertCircle, MoreVertical } from 'lucide-react';
 import api from '../../services/api';
 import MarketplaceDropdown from '../../components/MarketplaceDropdown';
 import JsBarcode from 'jsbarcode';
@@ -43,24 +43,26 @@ const Manifest = () => {
 
     const shipmentMode = localStorage.getItem('shipment_mode') || 'IXD';
 
+    const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
+
     const uniqueFCs = useMemo(() => {
         if (shipmentMode !== 'FC') return [];
         const fcs = new Set();
         manifestData.forEach(item => {
             if (item.fc) fcs.add(item.fc);
         });
-        return Array.from(fcs);
+        return ['All', ...Array.from(fcs)];
     }, [manifestData, shipmentMode]);
 
-    const [activeTabFC, setActiveTabFC] = useState('');
+    const [activeTabFC, setActiveTabFC] = useState('All');
     useEffect(() => {
         if (shipmentMode === 'FC' && uniqueFCs.length > 0 && !activeTabFC) {
-            setActiveTabFC(uniqueFCs[0]);
+            setActiveTabFC('All');
         }
     }, [uniqueFCs, shipmentMode, activeTabFC]);
 
     const activeManifestData = useMemo(() => {
-        if (shipmentMode === 'FC' && activeTabFC) {
+        if (shipmentMode === 'FC' && activeTabFC && activeTabFC !== 'All') {
             return manifestData.filter(item => item.fc === activeTabFC);
         }
         return manifestData;
@@ -166,7 +168,7 @@ const Manifest = () => {
                 const parsed = JSON.parse(savedSize);
                 setBarcodeSize(parsed);
                 setLocalBarcodeSize(parsed);
-            } catch (e) {}
+            } catch (e) { }
         }
     }, []);
 
@@ -174,7 +176,7 @@ const Manifest = () => {
         const val = e.target.value;
         const newSize = { ...localBarcodeSize, [field]: val === '' ? '' : (parseInt(val) || 0) };
         setLocalBarcodeSize(newSize);
-        
+
         if (sizeTimeoutRef.current) clearTimeout(sizeTimeoutRef.current);
         sizeTimeoutRef.current = setTimeout(() => {
             setBarcodeSize(newSize);
@@ -189,7 +191,7 @@ const Manifest = () => {
                 try {
                     const width = parseFloat(barcodeSize.width) || 50;
                     const height = parseFloat(barcodeSize.height) || 25;
-                    
+
                     const doc = new jsPDF({
                         orientation: width > height ? 'landscape' : 'portrait',
                         unit: 'mm',
@@ -200,15 +202,15 @@ const Manifest = () => {
                     dataToPrint.forEach((item, index) => {
                         const fnsku = item.fnsku || '';
                         if (!fnsku || fnsku.toUpperCase() === 'UNKNOWN') return;
-                        
+
                         if (pagesAdded > 0) doc.addPage([width, height]);
                         pagesAdded++;
-                        
+
                         const imgData = barcodeImages[fnsku];
-                        
+
                         if (imgData) {
-                            const imgW = width * 0.8; 
-                            const imgH = 9; 
+                            const imgW = width * 0.8;
+                            const imgH = 9;
                             const imgX = (width - imgW) / 2;
                             doc.addImage(imgData, 'PNG', imgX, 2, imgW, imgH);
                         }
@@ -216,12 +218,12 @@ const Manifest = () => {
                         doc.setFontSize(7);
                         doc.setFont('helvetica', 'bold');
                         doc.text(fnsku, width / 2, 14, { align: 'center' });
-                        
+
                         doc.setFontSize(6.5);
                         doc.setFont('helvetica', 'normal');
                         const title = `New - ${formatFnskuTitle(item.title)}`;
                         doc.text(title, width / 2, 18, { align: 'center' });
-                        
+
                         doc.setFontSize(7);
                         doc.setFont('helvetica', 'normal');
                         doc.text(`MRP: Rs ${item.mrp || '0'} /-`, width / 2, 22, { align: 'center' });
@@ -273,7 +275,7 @@ const Manifest = () => {
 
         const formData = new FormData();
         formData.append("file", selectedFile);
-        formData.append("fileType", "Manifest_Template"); 
+        formData.append("fileType", "Manifest_Template");
         formData.append("marketplace_id", selectedMarketplaceId);
 
         setIsUploading(true);
@@ -302,9 +304,9 @@ const Manifest = () => {
         setIsUploading(true); // Re-using loading state for export spinner
         try {
             // Frontend se data backend bhej rahe hain file me bharne ke liye
-            const response = await api.post('/download-manifest', { 
-                manifestData: activeManifestData, 
-                marketplace_id: selectedMarketplaceId 
+            const response = await api.post('/download-manifest', {
+                manifestData: activeManifestData,
+                marketplace_id: selectedMarketplaceId
             }, {
                 responseType: 'blob' // Blob isliye kyunki binary file wapas aayegi
             });
@@ -314,7 +316,7 @@ const Manifest = () => {
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            const fcName = activeTabFC && activeTabFC !== 'Unassigned' ? `_${activeTabFC}` : '';
+            const fcName = (shipmentMode === 'FC' && activeTabFC && activeTabFC !== 'All' && activeTabFC !== 'Unassigned') ? `_${activeTabFC}` : '';
             link.download = `Manifest_${selectedMarketplaceId}${fcName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
             document.body.appendChild(link);
             link.click();
@@ -324,7 +326,7 @@ const Manifest = () => {
             // Naya logic: Manifest download ho gaya, toh active plan ki memory clear kardo
             localStorage.removeItem('active_calc_marketplace');
             localStorage.removeItem('active_calc_plan_id');
-            
+
         } catch (error) {
             console.error("Export error", error);
             alert("Failed to export! Make sure you have uploaded the Manifest Template for this marketplace first.");
@@ -333,6 +335,44 @@ const Manifest = () => {
         }
     };
 
+    const handleDownloadAllFcSeparately = async (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        if (!selectedMarketplaceId) return alert("Please select a marketplace first!");
+
+        setIsUploading(true);
+        try {
+            for (let i = 0; i < uniqueFCs.length; i++) {
+                const fc = uniqueFCs[i];
+                const fcData = manifestData.filter(item => item.fc === fc);
+                if (fcData.length === 0) continue;
+
+                const response = await api.post('/download-manifest', {
+                    manifestData: fcData,
+                    marketplace_id: selectedMarketplaceId
+                }, { responseType: 'blob' });
+
+                const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `Manifest_${selectedMarketplaceId}_${fc}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                await new Promise(r => setTimeout(r, 500));
+            }
+
+            setIsExportModalOpen(false);
+            localStorage.removeItem('active_calc_marketplace');
+            localStorage.removeItem('active_calc_plan_id');
+        } catch (error) {
+            console.error("Export error", error);
+            alert("Failed to export all files. Make sure you have uploaded the Manifest Template.");
+        } finally {
+            setIsUploading(false);
+        }
+    };
     return (
         <div className="space-y-4">
             {/* Header */}
@@ -352,37 +392,16 @@ const Manifest = () => {
 
                 <div className="flex items-center gap-3">
                     {shipmentMode === 'FC' && uniqueFCs.length > 0 && (
-                        <div className="flex items-center gap-1 bg-[#F4F5F7] p-1 rounded-md border border-[#D9DDE5]">
+                        <select
+                            value={activeTabFC}
+                            onChange={(e) => setActiveTabFC(e.target.value)}
+                            className="px-3 py-1.5 bg-white border border-[#D9DDE5] rounded-[5px] text-xs font-bold text-[#1C2340] outline-none focus:border-[#5A5DF6]"
+                        >
                             {uniqueFCs.map(fc => (
-                                <button
-                                    key={fc}
-                                    onClick={() => setActiveTabFC(fc)}
-                                    className={`px-3 py-1.5 text-xs font-bold rounded ${activeTabFC === fc ? 'bg-white text-[#5A5DF6] shadow-sm' : 'text-[#1C2340]/60 hover:text-[#1C2340]'}`}
-                                >
-                                    {fc}
-                                </button>
+                                <option key={fc} value={fc}>{fc === 'All' ? 'All FC' : fc}</option>
                             ))}
-                        </div>
+                        </select>
                     )}
-
-                    <button
-                        onClick={() => setIsUploadModalOpen(true)}
-                        className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold shadow-sm transition-all rounded-[5px] border bg-white text-[#1C2340] hover:bg-[#F4F5F7] border-[#D9DDE5]`}
-                        title={hasTemplate ? "Replace existing template" : "Upload a new template"}
-                    >
-                        <Upload size={14} className="text-[#5A5DF6]" />
-                        {hasTemplate ? "Replace Template" : "Upload Template"}
-                    </button>
-
-                    <button
-                        onClick={() => setIsBarcodeModalOpen(true)}
-                        disabled={activeManifestData.length === 0}
-                        className="flex items-center gap-2 px-4 py-2 text-xs font-semibold shadow-sm transition-all rounded-[5px] border bg-white text-[#1C2340] hover:bg-[#F4F5F7] border-[#D9DDE5] disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <Scan size={14} className="text-[#E74C3C]" /> Print FNSKU Barcodes
-                    </button>
-
-
 
                     {/* Total Quantity Badge — sirf display, export me include nahi */}
                     <div className="flex items-center gap-2 bg-[#5A5DF6]/10 px-3 py-2 rounded-[5px]">
@@ -391,20 +410,76 @@ const Manifest = () => {
                         <span className="text-sm font-bold text-[#1C2340]">{totalQuantity.toLocaleString()}</span>
                     </div>
 
-                    {/* Export as Excel Button */}
-                    <button
-                        onClick={(e) => { 
-                            if (selectedMarketplaceId) {
-                                handleExportExcel(e);
-                            } else {
-                                setIsExportModalOpen(true); 
-                            }
-                        }}
-                        disabled={activeManifestData.length === 0}
-                        className="flex items-center gap-2 px-4 py-2 bg-[#22B573] hover:bg-[#1e9d64] text-white rounded-[5px] text-xs font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                        <FileSpreadsheet size={14} /> Export as Excel
-                    </button>
+                    {/* 3-Dot Action Menu */}
+                    <div className="relative">
+                        <button
+                            onClick={() => setIsActionMenuOpen(!isActionMenuOpen)}
+                            className="p-1.5 bg-white border border-[#D9DDE5] rounded-[5px] hover:bg-[#F4F5F7] transition-colors shadow-sm"
+                            title="Actions"
+                        >
+                            <MoreVertical size={16} className="text-[#1C2340]" />
+                        </button>
+
+                        {isActionMenuOpen && (
+                            <div className="absolute right-0 mt-2 w-56 bg-white border border-[#D9DDE5] rounded-[5px] shadow-lg z-50 py-1">
+                                <button
+                                    onClick={() => { setIsActionMenuOpen(false); setIsUploadModalOpen(true); }}
+                                    className="w-full text-left px-4 py-2 text-xs font-semibold text-[#1C2340] hover:bg-[#F4F5F7] flex items-center gap-2"
+                                >
+                                    <Upload size={14} className="text-[#5A5DF6]" /> {hasTemplate ? "Replace Template" : "Upload Template"}
+                                </button>
+                                
+                                <button
+                                    onClick={() => { setIsActionMenuOpen(false); setIsBarcodeModalOpen(true); }}
+                                    disabled={activeManifestData.length === 0}
+                                    className="w-full text-left px-4 py-2 text-xs font-semibold text-[#1C2340] hover:bg-[#F4F5F7] flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <Scan size={14} className="text-[#E74C3C]" /> Print FNSKU Barcodes
+                                </button>
+
+                                <div className="h-px bg-[#D9DDE5] my-1"></div>
+
+                                {shipmentMode === 'FC' && activeTabFC === 'All' ? (
+                                    <>
+                                        <button
+                                            onClick={(e) => { 
+                                                setIsActionMenuOpen(false);
+                                                if (selectedMarketplaceId) handleExportExcel(e);
+                                                else setIsExportModalOpen(true); 
+                                            }}
+                                            disabled={activeManifestData.length === 0}
+                                            className="w-full text-left px-4 py-2 text-xs font-semibold text-[#1C2340] hover:bg-[#F4F5F7] flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <FileSpreadsheet size={14} className="text-[#22B573]" /> Export Mixed Manifest
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                setIsActionMenuOpen(false);
+                                                if (selectedMarketplaceId) handleDownloadAllFcSeparately(e);
+                                                else setIsExportModalOpen(true);
+                                            }}
+                                            disabled={uniqueFCs.length <= 1}
+                                            className="w-full text-left px-4 py-2 text-xs font-semibold text-[#1C2340] hover:bg-[#F4F5F7] flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <Download size={14} className="text-[#5A5DF6]" /> Download All (Separately)
+                                        </button>
+                                    </>
+                                ) : (
+                                    <button
+                                        onClick={(e) => { 
+                                            setIsActionMenuOpen(false);
+                                            if (selectedMarketplaceId) handleExportExcel(e);
+                                            else setIsExportModalOpen(true); 
+                                        }}
+                                        disabled={activeManifestData.length === 0}
+                                        className="w-full text-left px-4 py-2 text-xs font-semibold text-[#1C2340] hover:bg-[#F4F5F7] flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <FileSpreadsheet size={14} className="text-[#22B573]" /> {shipmentMode === 'FC' ? 'Download Selected' : 'Export as Excel'}
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -467,9 +542,9 @@ const Manifest = () => {
                         </div>
                         <form onSubmit={handleTemplateUpload} className="p-6 space-y-5">
                             <div className="z-50 relative">
-                                <MarketplaceDropdown 
-                                    selectedId={selectedMarketplaceId} 
-                                    onChange={setSelectedMarketplaceId} 
+                                <MarketplaceDropdown
+                                    selectedId={selectedMarketplaceId}
+                                    onChange={setSelectedMarketplaceId}
                                 />
                             </div>
 
@@ -520,12 +595,12 @@ const Manifest = () => {
                         </div>
                         <form onSubmit={handleExportExcel} className="p-6 space-y-6">
                             <div className="z-50 relative">
-                                <MarketplaceDropdown 
-                                    selectedId={selectedMarketplaceId} 
-                                    onChange={setSelectedMarketplaceId} 
+                                <MarketplaceDropdown
+                                    selectedId={selectedMarketplaceId}
+                                    onChange={setSelectedMarketplaceId}
                                 />
                             </div>
-                            
+
                             <button type="submit" disabled={isUploading || !selectedMarketplaceId} className="w-full bg-[#22B573] text-white py-2.5 rounded-[5px] text-sm font-bold flex justify-center items-center gap-2 hover:bg-[#1e9d64] disabled:opacity-70">
                                 {isUploading ? <><Loader2 size={16} className="animate-spin" /> Generating...</> : "Download Excel"}
                             </button>
@@ -545,30 +620,30 @@ const Manifest = () => {
                             <div className="flex items-center gap-4">
                                 <div className="flex items-center gap-1 text-xs">
                                     <span className="font-semibold text-gray-600 mr-1">Dimensions:</span>
-                                    <input 
-                                        type="number" 
-                                        value={localBarcodeSize.width} 
+                                    <input
+                                        type="number"
+                                        value={localBarcodeSize.width}
                                         onChange={(e) => handleBarcodeSizeChange(e, 'width')}
-                                        className="w-12 border border-gray-300 rounded px-1 text-center outline-none focus:border-[#5A5DF6]" 
+                                        className="w-12 border border-gray-300 rounded px-1 text-center outline-none focus:border-[#5A5DF6]"
                                     />
                                     <span className="text-gray-500">x</span>
-                                    <input 
-                                        type="number" 
-                                        value={localBarcodeSize.height} 
+                                    <input
+                                        type="number"
+                                        value={localBarcodeSize.height}
                                         onChange={(e) => handleBarcodeSizeChange(e, 'height')}
-                                        className="w-12 border border-gray-300 rounded px-1 text-center outline-none focus:border-[#5A5DF6]" 
+                                        className="w-12 border border-gray-300 rounded px-1 text-center outline-none focus:border-[#5A5DF6]"
                                     />
                                     <span className="text-gray-500 text-[10px]">mm</span>
                                 </div>
-                                <button 
-                                    onClick={handlePrintPDF}
+                                <button
+                                    onClick={() => handlePrintPDF()}
                                     disabled={isGeneratingPDF}
                                     className={`text-white px-4 py-1.5 rounded-[5px] text-xs font-bold shadow-sm transition-colors flex items-center justify-center min-w-[70px] ${isGeneratingPDF ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#5A5DF6] hover:bg-[#494ce0]'}`}
                                 >
                                     {isGeneratingPDF ? <Loader2 size={14} className="animate-spin" /> : 'Print'}
                                 </button>
-                                <button 
-                                    onClick={() => setShowBarcodePreview(!showBarcodePreview)} 
+                                <button
+                                    onClick={() => setShowBarcodePreview(!showBarcodePreview)}
                                     className="text-gray-500 hover:text-[#5A5DF6] transition-colors"
                                     title="Toggle Preview"
                                 >
@@ -591,7 +666,7 @@ const Manifest = () => {
 
                         {/* UI Preview Area */}
                         <div style={{ display: showBarcodePreview ? 'block' : 'none' }} className="p-8 flex-1 overflow-hidden bg-gray-100">
-                            
+
                             <Virtuoso
                                 data={virtualRows}
                                 style={{ height: '100%', width: '100%' }}
@@ -610,9 +685,9 @@ const Manifest = () => {
                                         return (
                                             <div className="flex flex-wrap gap-6 mb-4 justify-center">
                                                 {row.items.map((item) => (
-                                                    <div 
-                                                        key={`preview-${item.originalIndex}-${item.printIndex}`} 
-                                                        className="flex items-center justify-center shrink-0" 
+                                                    <div
+                                                        key={`preview-${item.originalIndex}-${item.printIndex}`}
+                                                        className="flex items-center justify-center shrink-0"
                                                         style={{ width: `${(barcodeSize.width || 50) * 1.2}mm`, height: `${(barcodeSize.height || 25) * 1.2}mm` }}
                                                     >
                                                         <div
@@ -629,7 +704,7 @@ const Manifest = () => {
                                                                 transformOrigin: 'center center'
                                                             }}
                                                         >
-                                                        <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
+                                                            <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
                                                                 {barcodeImages[item.fnsku || 'UNKNOWN'] ? (
                                                                     <img src={barcodeImages[item.fnsku || 'UNKNOWN']} alt={item.fnsku} />
                                                                 ) : (
@@ -654,7 +729,7 @@ const Manifest = () => {
                                 }}
                             />
                         </div>
-                        
+
                         {!showBarcodePreview && (
                             <div className="p-10 flex flex-col items-center justify-center text-gray-400 gap-2 bg-gray-100 flex-1">
                                 <EyeOff size={32} />
