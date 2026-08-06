@@ -1239,7 +1239,7 @@ const Calculation = () => {
             if (hasStockAllocation) {
                 if (typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / ')) {
                     const alloc = Number(item.stock_alloc.split(' / ')[1]);
-                    if (!isNaN(alloc)) val = alloc;
+                    if (!isNaN(alloc)) val = Math.max(0, alloc);
                 } else {
                     val = 0; // Empty or null stock_alloc in Stock Mode means 0 allocated
                 }
@@ -1267,7 +1267,7 @@ const Calculation = () => {
             if (hasStockAllocation) {
                 if (typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / ')) {
                     const alloc = Number(item.stock_alloc.split(' / ')[1]);
-                    if (!isNaN(alloc)) val = alloc;
+                    if (!isNaN(alloc)) val = Math.max(0, alloc);
                 } else {
                     val = 0; // Empty or null stock_alloc in Stock Mode means 0 allocated
                 }

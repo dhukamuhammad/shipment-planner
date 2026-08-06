@@ -4,6 +4,7 @@ const csv = require("csv-parser");
 const ExcelJS = require("exceljs");
 const db = require("../../config/db");
 const { successResponse, errorResponse } = require("../../utils/responseFormatter");
+const { logActivity } = require("../../utils/logger");
 
 const sanitizeNumber = (val, isFloat = false) => {
     if (val === null || val === undefined || val === '') return 0;
@@ -146,6 +147,8 @@ const uploadStockReport = async (req, res) => {
 
         await connection.commit();
         connection.release();
+
+        await logActivity(req.user?.id, 'UPLOAD', 'Stock', `Uploaded Stock Availability: ${req.file.filename}`);
 
         return successResponse(res, "Stock Availability Uploaded Successfully!", {
             reportId, totalGroups: bulkValues.length

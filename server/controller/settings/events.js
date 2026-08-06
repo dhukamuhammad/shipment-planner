@@ -1,5 +1,6 @@
 const db = require("../../config/db");
 const { successResponse, errorResponse } = require("../../utils/responseFormatter");
+const { logActivity } = require("../../utils/logger");
 
 // Get all events
 const getEvents = async (req, res) => {
@@ -38,6 +39,8 @@ const addEvent = async (req, res) => {
         );
         connection.release();
         
+        await logActivity(req.user?.id, 'CREATE', 'Events', `Created new event: ${event_name}`);
+
         return successResponse(res, "Event added successfully", { id: result.insertId }, 201);
     } catch (error) {
         console.error("Add Event Error:", error);
@@ -67,6 +70,8 @@ const updateEvent = async (req, res) => {
         );
         connection.release();
         
+        await logActivity(req.user?.id, 'UPDATE', 'Events', `Updated event: ${event_name}`);
+        
         return successResponse(res, "Event updated successfully", null, 200);
     } catch (error) {
         console.error("Update Event Error:", error);
@@ -80,8 +85,13 @@ const deleteEvent = async (req, res) => {
         const { id } = req.params;
         
         const connection = await db.getConnection();
+        const [oldEvent] = await connection.query(`SELECT event_name FROM events_calendar WHERE id=?`, [id]);
+        const eventName = oldEvent.length > 0 ? oldEvent[0].event_name : 'Unknown';
+
         await connection.query(`DELETE FROM events_calendar WHERE id=?`, [id]);
         connection.release();
+        
+        await logActivity(req.user?.id, 'DELETE', 'Events', `Deleted event: ${eventName}`);
         
         return successResponse(res, "Event deleted successfully", null, 200);
     } catch (error) {

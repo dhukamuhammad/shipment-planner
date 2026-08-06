@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
-import { Users, UserPlus, Loader2, AlertCircle, Save, Edit2, Trash2 } from 'lucide-react';
+import { Users, UserPlus, Loader2, AlertCircle, Save, Edit2, Trash2, History, Ban, Unlock } from 'lucide-react';
+import ActivityLogs from './ActivityLogs';
 import { useAuth } from '../../context/AuthContext';
 
 const UserManagement = () => {
@@ -10,6 +11,7 @@ const UserManagement = () => {
     const [error, setError] = useState('');
     const [isAdding, setIsAdding] = useState(false);
     const [editingUserId, setEditingUserId] = useState(null);
+    const [historyUserId, setHistoryUserId] = useState(null);
     
     // Form state
     const [name, setName] = useState('');
@@ -34,6 +36,16 @@ const UserManagement = () => {
             setError('Failed to load users.');
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleHistoryClick = async (userId) => {
+        setHistoryUserId(userId);
+        try {
+            await api.post(`/users/${userId}/mark-logs-read`);
+            setUsers(prev => prev.map(u => u.id === userId ? { ...u, unread_count: 0 } : u));
+        } catch (error) {
+            console.error("Failed to mark logs as read:", error);
         }
     };
 
@@ -103,6 +115,20 @@ const UserManagement = () => {
             } catch (err) {
                 alert(err.response?.data?.message || 'Failed to delete user');
             }
+        }
+    };
+
+    const handleToggleBlock = async (id, currentStatus) => {
+        const action = currentStatus ? 'unblock' : 'block';
+        if (!window.confirm(`Are you sure you want to ${action} this user?`)) return;
+        
+        try {
+            const res = await api.put(`/users/${id}/toggle-block`, { is_blocked: !currentStatus });
+            if (res.data.success) {
+                fetchUsers();
+            }
+        } catch (err) {
+            alert(err.response?.data?.message || `Failed to ${action} user`);
         }
     };
 
@@ -184,6 +210,25 @@ const UserManagement = () => {
                     </div>
                 )}
 
+                {/* History Modal Overlay */}
+                {historyUserId && (
+                    <div className="fixed inset-0 bg-[#1C2340]/40 z-50 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+                            <div className="px-6 py-4 border-b border-[#D9DDE5] bg-gray-50 flex justify-between items-center">
+                                <h3 className="text-base font-bold text-[#1C2340]">User Activity History</h3>
+                                <button onClick={() => setHistoryUserId(null)} className="text-gray-400 hover:text-gray-600">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <div className="overflow-y-auto p-6 bg-gray-50">
+                                <ActivityLogs userId={historyUserId} isModal={true} />
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {isLoading ? (
                     <div className="flex justify-center py-8"><Loader2 className="animate-spin text-[#5A5DF6]" /></div>
                 ) : (
@@ -213,6 +258,26 @@ const UserManagement = () => {
                                         </td>
                                         <td className="py-3 px-4 text-right">
                                             <div className="flex items-center justify-end gap-2">
+                                                <button
+                                                    onClick={() => handleHistoryClick(u.id)}
+                                                    className="relative p-1.5 text-gray-500 hover:text-blue-500 hover:bg-blue-50 rounded transition-colors"
+                                                    title="View Activity History"
+                                                >
+                                                    <History size={16} />
+                                                    {u.unread_count > 0 && (
+                                                        <span className="absolute -top-1.5 -right-1.5 bg-[#EF4444] text-white text-[9px] font-bold h-4 min-w-[16px] px-1 rounded-full border-2 border-white shadow-sm flex items-center justify-center leading-none">
+                                                            {u.unread_count > 99 ? '99+' : u.unread_count}
+                                                        </span>
+                                                    )}
+                                                </button>
+                                                <button
+                                                    onClick={() => handleToggleBlock(u.id, u.is_blocked)}
+                                                    disabled={currentUser?.id === u.id}
+                                                    className={`p-1.5 rounded transition-colors ${currentUser?.id === u.id ? 'text-gray-300 cursor-not-allowed' : (u.is_blocked ? 'text-green-500 hover:bg-green-50' : 'text-orange-500 hover:bg-orange-50')}`}
+                                                    title={currentUser?.id === u.id ? 'Cannot block yourself' : (u.is_blocked ? 'Unblock User' : 'Block User')}
+                                                >
+                                                    {u.is_blocked ? <Unlock size={16} /> : <Ban size={16} />}
+                                                </button>
                                                 <button
                                                     onClick={() => handleOpenEdit(u)}
                                                     className="p-1.5 text-gray-500 hover:text-[#5A5DF6] hover:bg-[#5A5DF6]/10 rounded transition-colors"

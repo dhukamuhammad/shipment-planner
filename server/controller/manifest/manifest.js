@@ -4,6 +4,7 @@ const xlsx = require('xlsx');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
+const { logActivity } = require('../../utils/logger');
 
 // =======================================================
 // 1. Check if Manifest Template Exists
@@ -84,6 +85,8 @@ const uploadTemplate = async (req, res) => {
              VALUES (?, 'Manifest_Template', ?, 'Success', ?)`,
             [file.filename, fileSize, marketplace_id]
         );
+
+        await logActivity(req.user?.id, 'UPLOAD', 'Manifest', `Uploaded Manifest Template: ${file.filename}`);
 
         return res.json({ message: "Template uploaded successfully" });
     } catch (error) {
@@ -211,6 +214,8 @@ const downloadManifest = async (req, res) => {
             `UPDATE uploaded_reports SET is_manifested = 1 WHERE marketplace_id = ? AND is_manifested = 0 AND report_type NOT IN ('Calculation', 'Manifest_Template')`,
             [marketplace_id]
         );
+
+        await logActivity(req.user?.id, 'DOWNLOAD', 'Manifest', `Generated and downloaded Manifest for Marketplace ID: ${marketplace_id}`);
 
         res.setHeader('Content-Disposition', 'attachment; filename="Manifest_Export.xlsx"');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

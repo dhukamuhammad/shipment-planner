@@ -4,6 +4,7 @@ const csv = require("csv-parser");
 const ExcelJS = require("exceljs");
 const db = require("../../config/db");
 const { successResponse, errorResponse } = require("../../utils/responseFormatter");
+const { logActivity } = require("../../utils/logger");
 
 // Helper: Sanitize Numbers
 const sanitizeNumber = (val, isFloat = false) => {
@@ -373,6 +374,9 @@ const uploadCalculationReport = async (req, res) => {
         connection.release();
 
         const timeTaken = ((Date.now() - totalStartTime) / 1000).toFixed(2);
+        
+        await logActivity(req.user?.id, 'UPLOAD', 'Calculation', `Uploaded Calculation Report: ${req.file.filename}`);
+        
         return successResponse(res, "Calculation Sheet Uploaded Successfully!", {
             reportId, planId, totalRecordsInserted: bulkValues.length, timeTaken: `${timeTaken}s`
         }, 201);
@@ -422,6 +426,8 @@ const addManualCalculationRow = async (req, res) => {
             data.sku, data.title || null, fcId
         ]);
 
+        await logActivity(req.user?.id, 'CREATE', 'Calculation', `Added manual SKU row for SKU: ${data.sku}`);
+
         connection.release();
         return successResponse(res, "SKU row added successfully!", null, 201);
     } catch (error) {
@@ -445,6 +451,9 @@ const editCalculationRow = async (req, res) => {
              WHERE id=?`,
             [groupName, sku, title, category, hsn, gst, cost, weight, isActive !== undefined ? isActive : 1, sku, title, itemId]
         );
+        
+        await logActivity(req.user?.id, 'UPDATE', 'Calculation', `Edited calculation row for SKU: ${sku}`);
+        
         connection.release();
         return successResponse(res, "Row updated successfully!", null, 200);
     } catch (error) {
@@ -461,7 +470,13 @@ const deleteCalculationRow = async (req, res) => {
         const { id } = req.params; // ID URL param se aayegi
         const connection = await db.getConnection();
 
+        const [itemRows] = await connection.query(`SELECT sku FROM shipment_calculation_items WHERE id=?`, [id]);
+        const sku = itemRows.length > 0 ? itemRows[0].sku : 'Unknown';
+
         await connection.query(`DELETE FROM shipment_calculation_items WHERE id=?`, [id]);
+        
+        await logActivity(req.user?.id, 'DELETE', 'Calculation', `Deleted SKU from calculation plan: ${sku}`);
+        
         connection.release();
         return successResponse(res, "Row deleted successfully!", null, 200);
     } catch (error) {
@@ -1062,12 +1077,25 @@ const updateMasterData = async (req, res) => {
         }
 
         const connection = await db.getConnection();
+        
+        const [oldRows] = await connection.query(`SELECT ${field} FROM shipment_calculations_master WHERE id = ?`, [planId]);
+        const oldVal = oldRows.length > 0 ? oldRows[0][field] : 'Unknown';
 
         // Dynamic query to update specific field
         await connection.query(
             `UPDATE shipment_calculations_master SET ${field} = ? WHERE id = ?`,
             [value, planId]
         );
+        
+        const fieldNameMap = {
+            'afs_days': 'AFS Days',
+            'shipment_plan_days': 'Shipment Plan Days',
+            'bunch_qty': 'Bunch Qty'
+        };
+        const niceFieldName = fieldNameMap[field] || field;
+
+        await logActivity(req.user?.id, 'UPDATE', 'Calculation', `Changed ${niceFieldName} from ${oldVal} to ${value}`);
+        
         connection.release();
 
         return successResponse(res, "Value auto-saved successfully!", null, 200);
@@ -1085,11 +1113,18 @@ const updateItemFinalWh = async (req, res) => {
         const { itemId, finalWh } = req.body;
         const connection = await db.getConnection();
 
+        const [itemRows] = await connection.query(`SELECT sku, final_wh FROM shipment_calculation_items WHERE id = ?`, [itemId]);
+        const sku = itemRows.length > 0 ? itemRows[0].sku : 'Unknown';
+        const oldVal = itemRows.length > 0 ? itemRows[0].final_wh : '0';
+
         // Value update karo aur flag ko 1 (true) kar do
         await connection.query(
             `UPDATE shipment_calculation_items SET final_wh = ?, is_manual_final_wh = 1 WHERE id = ?`,
             [finalWh, itemId]
         );
+        
+        await logActivity(req.user?.id, 'UPDATE', 'Calculation', `Changed Final WH for SKU: ${sku} from ${oldVal || 0} to ${finalWh}`);
+        
         connection.release();
         return successResponse(res, "Final WH manually updated!", null, 200);
     } catch (error) {
@@ -1106,11 +1141,18 @@ const updateItemSuggestWh = async (req, res) => {
         const { itemId, suggestWh } = req.body;
         const connection = await db.getConnection();
 
+        const [itemRows] = await connection.query(`SELECT sku, suggest_final_wh FROM shipment_calculation_items WHERE id = ?`, [itemId]);
+        const sku = itemRows.length > 0 ? itemRows[0].sku : 'Unknown';
+        const oldVal = itemRows.length > 0 ? itemRows[0].suggest_final_wh : '0';
+
         // Value update karo aur flag ko 1 (true) kar do
         await connection.query(
             `UPDATE shipment_calculation_items SET suggest_final_wh = ?, is_manual_suggest_final_wh = 1 WHERE id = ?`,
             [suggestWh, itemId]
         );
+        
+        await logActivity(req.user?.id, 'UPDATE', 'Calculation', `Changed Suggest Final WH for SKU: ${sku} from ${oldVal || 0} to ${suggestWh}`);
+        
         connection.release();
         return successResponse(res, "Suggest Final WH manually updated!", null, 200);
     } catch (error) {
@@ -1132,6 +1174,9 @@ const resetFinalWh = async (req, res) => {
             `UPDATE shipment_calculation_items SET is_manual_final_wh = 0, is_manual_suggest_final_wh = 0 WHERE plan_id = ?`,
             [planId]
         );
+        
+        await logActivity(req.user?.id, 'UPDATE', 'Calculation', `Reset calculations to formula for all SKUs`);
+        
         connection.release();
         return successResponse(res, "Calculations reset to formula!", null, 200);
     } catch (error) {
@@ -1211,6 +1256,9 @@ const deleteCalculationPlan = async (req, res) => {
         const connection = await db.getConnection();
         await connection.query('DELETE FROM shipment_calculation_items WHERE plan_id = ?', [id]);
         await connection.query('DELETE FROM shipment_calculations_master WHERE id = ?', [id]);
+        
+        await logActivity(req.user?.id, 'DELETE', 'Calculation', `Deleted a calculation plan and all its SKUs`);
+        
         connection.release();
         return successResponse(res, "Plan deleted successfully", null, 200);
     } catch (error) {

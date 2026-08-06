@@ -18,6 +18,13 @@ const login = async (req, res) => {
 
         const user = users[0];
 
+        if (user.is_blocked) {
+            return res.status(403).json({
+                success: false,
+                message: 'Your account is temporarily suspended. Please contact Admin.'
+            });
+        }
+
         const passwordIsValid = await bcrypt.compare(password, user.password);
 
         if (!passwordIsValid) {

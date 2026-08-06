@@ -4,6 +4,7 @@ const csv = require("csv-parser");
 const ExcelJS = require("exceljs"); // 🚀 Sabse fast aur reliable package
 const db = require("../../config/db");
 const { successResponse, errorResponse } = require("../../utils/responseFormatter");
+const { logActivity } = require("../../utils/logger");
 
 const parseCsv = (filePath) => {
     return new Promise((resolve, reject) => {
@@ -260,6 +261,8 @@ const uploadAFSReport = async (req, res) => {
         const timeTaken = ((Date.now() - totalStartTime) / 1000).toFixed(2);
         console.log(`✅ Upload completed in ${timeTaken} seconds\n`);
 
+        await logActivity(req.user?.id, 'UPLOAD', 'Uploads', `Uploaded AFS Report: ${req.file.filename}`);
+
         return successResponse(res, "AFS Report uploaded and saved to DB successfully!", {
             reportId,
             fileName: req.file.filename,
@@ -491,6 +494,8 @@ const uploadBusinessReport = async (req, res) => {
         const timeTaken = ((Date.now() - totalStartTime) / 1000).toFixed(2);
         console.log(`✅ Business Report Upload completed in ${timeTaken} seconds\n`);
 
+        await logActivity(req.user?.id, 'UPLOAD', 'Uploads', `Uploaded Business Report: ${req.file.filename}`);
+
         return successResponse(res, "Business Report uploaded and processed successfully!", {
             reportId,
             fileName: req.file.filename,
@@ -703,6 +708,8 @@ const uploadDIHReport = async (req, res) => {
         const timeTaken = ((Date.now() - totalStartTime) / 1000).toFixed(2);
         console.log(`✅ DIH Report Upload completed in ${timeTaken} seconds\n`);
 
+        await logActivity(req.user?.id, 'UPLOAD', 'Uploads', `Uploaded DIH Report: ${req.file.filename}`);
+
         return successResponse(res, "DIH Report uploaded and processed successfully!", {
             reportId,
             fileName: req.file.filename,
@@ -771,6 +778,8 @@ const deleteReport = async (req, res) => {
         if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
         }
+
+        await logActivity(req.user?.id, 'DELETE', 'Uploads', `Deleted Report: ${fileName}`);
 
         return successResponse(res, "Report deleted successfully!", null, 200);
     } catch (error) {
@@ -1020,7 +1029,9 @@ const uploadTransitShipmentReport = async (req, res) => {
         connection.release();
 
         const timeTaken = ((Date.now() - totalStartTime) / 1000).toFixed(2);
-        console.log(`✅ Transit Shipment Upload completed in ${timeTaken} seconds\n`);
+        console.log(`✅ Transit Report Upload completed in ${timeTaken} seconds\n`);
+
+        await logActivity(req.user?.id, 'UPLOAD', 'Uploads', `Uploaded Transit Report: ${req.file.filename}`);
 
         return successResponse(res, "Transit Shipment Report uploaded successfully!", {
             reportId,
