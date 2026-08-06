@@ -89,6 +89,21 @@ const toggleIxdWarehouse = async (req, res) => {
         if (!id) return res.status(400).json({ success: false, message: "Warehouse ID is required" });
 
         const connection = await db.getConnection();
+        
+        // Fetch the type and marketplace_id of the target warehouse
+        const [rows] = await connection.query(`SELECT type, marketplace_id FROM ixd_warehouses WHERE id = ?`, [id]);
+        if (rows.length === 0) {
+            connection.release();
+            return res.status(404).json({ success: false, message: "Warehouse not found" });
+        }
+        
+        const { type, marketplace_id } = rows[0];
+
+        // If it's IXD and we are activating it, deactivate all other IXDs for the same marketplace
+        if (type === 'IXD' && is_active) {
+            await connection.query(`UPDATE ixd_warehouses SET is_active = 0 WHERE type = 'IXD' AND marketplace_id = ?`, [marketplace_id]);
+        }
+
         await connection.query(`UPDATE ixd_warehouses SET is_active = ? WHERE id = ?`, [is_active ? 1 : 0, id]);
         connection.release();
 

@@ -3,6 +3,8 @@ import api from '../../services/api';
 import { Settings as SettingsIcon, Save, Loader2, AlertCircle, Box } from 'lucide-react';
 import EventCalendar from './EventCalendar';
 import IXDWarehouseModal from './IXDWarehouseModal';
+import UserManagement from './UserManagement';
+import { useAuth } from '../../context/AuthContext';
 
 const Settings = () => {
     const [useSuggestedWh, setUseSuggestedWh] = useState(false);
@@ -10,6 +12,7 @@ const Settings = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const { user } = useAuth();
 
     // Fetch settings on load
     useEffect(() => {
@@ -131,6 +134,9 @@ const Settings = () => {
                     </div>
                 </div>
             </div>
+
+            {/* User Management System - Only for Super Admin */}
+            {user?.role === 'super_admin' && <UserManagement />}
 
             <IXDWarehouseModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
         </div>

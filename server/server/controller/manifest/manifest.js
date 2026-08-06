@@ -200,32 +200,17 @@ const downloadManifest = async (req, res) => {
         // 4. Nayi file ko buffer me likhein aur send karein
         const buffer = await workbook.xlsx.writeBuffer();
 
-        // Get the current draft plan to find associated reports
-        const [draftPlanRows] = await connection.query(
-            `SELECT afs_report_id, dih_report_id, transit_report_id 
-             FROM shipment_calculations_master 
-             WHERE marketplace_id = ? AND status = 'Draft'`,
-            [marketplace_id]
-        );
-
         // Mark the active calculation plan as Completed
         await connection.query(
             `UPDATE shipment_calculations_master SET status = 'Completed' WHERE marketplace_id = ? AND status = 'Draft'`,
             [marketplace_id]
         );
 
-        // Mark associated files as manifested so they hide from Recent Uploads
-        if (draftPlanRows.length > 0) {
-            const { afs_report_id, dih_report_id, transit_report_id } = draftPlanRows[0];
-            const reportIdsToHide = [afs_report_id, dih_report_id, transit_report_id].filter(id => id !== null);
-            
-            if (reportIdsToHide.length > 0) {
-                await connection.query(
-                    `UPDATE uploaded_reports SET is_manifested = 1 WHERE id IN (?)`,
-                    [reportIdsToHide]
-                );
-            }
-        }
+        // Mark associated active files as manifested so they hide from Recent Uploads
+        await connection.query(
+            `UPDATE uploaded_reports SET is_manifested = 1 WHERE marketplace_id = ? AND is_manifested = 0 AND report_type NOT IN ('Calculation', 'Manifest_Template')`,
+            [marketplace_id]
+        );
 
         res.setHeader('Content-Disposition', 'attachment; filename="Manifest_Export.xlsx"');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

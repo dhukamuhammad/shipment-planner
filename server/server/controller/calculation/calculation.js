@@ -490,7 +490,10 @@ const getCalculationData = async (req, res) => {
         if (planId) {
             whereClauses.push(`id = ?`);
             masterParams.push(planId);
+        } else {
+            whereClauses.push(`status = 'Draft'`);
         }
+        
         if (marketplace_id) {
             whereClauses.push(`marketplace_id = ?`);
             masterParams.push(marketplace_id);
@@ -504,12 +507,58 @@ const getCalculationData = async (req, res) => {
 
         const [masterRows] = await connection.query(masterQuery, masterParams);
 
-        if (masterRows.length === 0) {
-            connection.release();
-            return successResponse(res, "No data found", { master: null, items: [] }, 200);
-        }
+        let masterData = null;
 
-        const masterData = masterRows[0];
+        if (masterRows.length === 0) {
+            // AUTO-CLONE LOGIC: if no Draft plan exists, clone the latest Completed plan
+            if (!planId && marketplace_id) {
+                const [latestCompleted] = await connection.query(
+                    `SELECT * FROM shipment_calculations_master WHERE marketplace_id = ? AND status = 'Completed' ORDER BY created_at DESC LIMIT 1`,
+                    [marketplace_id]
+                );
+
+                if (latestCompleted.length > 0) {
+                    const clonedPlan = latestCompleted[0];
+                    // Clone master (excluding id, status, timestamps)
+                    const [insertResult] = await connection.query(
+                        `INSERT INTO shipment_calculations_master (report_id, afs_days, shipment_plan_days, bunch_qty, to_ship_qty, status, marketplace_id, is_deleted, afs_report_id, dih_report_id, transit_report_id)
+                         VALUES (?, ?, ?, ?, ?, 'Draft', ?, 0, ?, ?, ?)`,
+                        [clonedPlan.report_id, clonedPlan.afs_days, clonedPlan.shipment_plan_days, clonedPlan.bunch_qty, clonedPlan.to_ship_qty, clonedPlan.marketplace_id, clonedPlan.afs_report_id, clonedPlan.dih_report_id, clonedPlan.transit_report_id]
+                    );
+
+                    // Clone items
+                    await connection.query(`
+                        INSERT INTO shipment_calculation_items (
+                            plan_id, report_id, group_name, sku, title, category,
+                            int_wh, dec_wh, non_apron_qty, apr_sky_blue, apr_dark_blue, apr_brown, apr_green, apr_tan, apr_black, apr_red, apr_grey,
+                            weight, total_weight, hsn, gst, cost, ref_sku, ref_title, tra_qty, quantity, available_qty, stock_alloc,
+                            ixd_fulfilment_id, warehouse_fulfilment_id, sale_total, sale_wh, sale_wh_avg, ship_wh, sum_val, final_wh,
+                            is_manual_final_wh, marketplace_id, suggest_final_wh, is_manual_suggest_final_wh, shipment_packaging,
+                            mrp, fnsku, packing_dimension_length, packing_dimension_width, packing_dimension_height, packing_dimension_unit, fc, fc_breakdown
+                        )
+                        SELECT 
+                            ?, report_id, group_name, sku, title, category,
+                            int_wh, dec_wh, non_apron_qty, apr_sky_blue, apr_dark_blue, apr_brown, apr_green, apr_tan, apr_black, apr_red, apr_grey,
+                            weight, total_weight, hsn, gst, cost, ref_sku, ref_title, tra_qty, quantity, available_qty, stock_alloc,
+                            ixd_fulfilment_id, warehouse_fulfilment_id, sale_total, sale_wh, sale_wh_avg, ship_wh, sum_val, final_wh,
+                            is_manual_final_wh, marketplace_id, suggest_final_wh, is_manual_suggest_final_wh, shipment_packaging,
+                            mrp, fnsku, packing_dimension_length, packing_dimension_width, packing_dimension_height, packing_dimension_unit, fc, fc_breakdown
+                        FROM shipment_calculation_items WHERE plan_id = ?
+                    `, [insertResult.insertId, clonedPlan.id]);
+
+                    // Now update masterData to the new cloned plan so the rest of the flow uses it
+                    const [newMasterRows] = await connection.query(`SELECT * FROM shipment_calculations_master WHERE id = ?`, [insertResult.insertId]);
+                    masterData = newMasterRows[0];
+                }
+            }
+            
+            if (!masterData) {
+                connection.release();
+                return successResponse(res, "No data found", { master: null, items: [] }, 200);
+            }
+        } else {
+            masterData = masterRows[0];
+        }
 
         let calculatedAfsDays = masterData.afs_days; // Default fallback
 
@@ -518,6 +567,25 @@ const getCalculationData = async (req, res) => {
             `SELECT * FROM shipment_calculation_items WHERE plan_id = ?`,
             [masterData.id]
         );
+
+        // --- FREEZE HISTORICAL DATA ---
+        // Agar plan 'Completed' (Manifested) hai, toh uski data ko recalculate mat karo.
+        // Seedha DB se raw rows bhej do, kyunki manifest hone par calculation final ho chuki hai.
+        if (masterData.status === 'Completed') {
+            connection.release();
+            // Ensure fc_breakdown is parsed if needed by frontend
+            const parsedItems = itemRows.map(item => {
+                let parsedFcBreakdown = item.fc_breakdown;
+                if (typeof parsedFcBreakdown === 'string') {
+                    try { parsedFcBreakdown = JSON.parse(parsedFcBreakdown); } catch (e) { }
+                }
+                return { ...item, fc_breakdown: parsedFcBreakdown };
+            });
+            return successResponse(res, "Success", {
+                master: masterData,
+                items: parsedItems
+            }, 200);
+        }
 
         // --- SMART DATE MATCHING FOR TRANSIT SHIPMENT ---
         const [latestOtherReports] = await connection.query(`
@@ -732,10 +800,16 @@ const getCalculationData = async (req, res) => {
 
         // --- FETCH ACTIVE WAREHOUSES FOR FC MODE ---
         let activeFCs = [];
+        let activeIXD = null;
         if (shipmentMode === 'FC') {
             if (masterData.marketplace_id) {
                 const [fcs] = await connection.query("SELECT name FROM ixd_warehouses WHERE type = 'Warehouse' AND marketplace_id = ? AND is_active = 1", [masterData.marketplace_id]);
                 activeFCs = fcs.map(f => f.name);
+            }
+        } else if (shipmentMode === 'IXD') {
+            if (masterData.marketplace_id) {
+                const [ixds] = await connection.query("SELECT name FROM ixd_warehouses WHERE type = 'IXD' AND marketplace_id = ? AND is_active = 1 LIMIT 1", [masterData.marketplace_id]);
+                if (ixds.length > 0) activeIXD = ixds[0].name;
             }
         }
 
@@ -823,7 +897,7 @@ const getCalculationData = async (req, res) => {
             // --- SUGGEST FINAL-WH CALCULATION ---
             let suggestedShipWh = 0;
             if (afsDays > 0) {
-                suggestedShipWh = Math.ceil(((saleWhAvg / afsDays) * shipmentPlanDays) - availableQty);
+                suggestedShipWh = Math.ceil(((Math.round(saleWhAvg) / afsDays) * shipmentPlanDays) - availableQty);
             }
 
             let sugIntWh = "";
@@ -845,7 +919,7 @@ const getCalculationData = async (req, res) => {
             }
 
             const displaySuggestFinalWh = item.is_manual_suggest_final_wh ? item.suggest_final_wh : suggestFinalWh;
-            const demand = Number(displaySuggestFinalWh) || 0;
+            const demand = Number(displayFinalWh) || 0;
 
             const grp = item.group_name ? item.group_name.trim().toLowerCase() : 'unknown';
             if (!groupDemandMap[grp]) groupDemandMap[grp] = 0;
@@ -876,18 +950,16 @@ const getCalculationData = async (req, res) => {
             const totalDemand = groupDemandMap[grp] || 0;
 
             let stock_alloc_qty = null;
-            let finalSuggested = item.suggest_final_wh;
+            let finalSuggested = item.suggest_final_wh; // Keep the uncapped value!
 
             if (totalAvailable !== null) {
                 if (totalDemand === 0) {
                     stock_alloc_qty = 0;
-                    finalSuggested = 0;
                 } else if (totalAvailable >= totalDemand) {
                     stock_alloc_qty = item._demand; // Enough stock to fulfill this SKU's demand entirely
                 } else {
-                    // Proportional allocation
+                    // Proportional allocation (used for display only)
                     stock_alloc_qty = Math.floor((item._demand / totalDemand) * totalAvailable);
-                    finalSuggested = Math.min(item._demand, stock_alloc_qty);
                 }
             }
 
@@ -957,7 +1029,8 @@ const getCalculationData = async (req, res) => {
 
         return successResponse(res, "Data fetched successfully", {
             master: masterData,
-            items: itemsWithTraQty
+            items: itemsWithTraQty,
+            ixdName: activeIXD
         }, 200);
 
     } catch (error) {
@@ -1107,8 +1180,20 @@ const getManifestDetails = async (req, res) => {
 // =======================================================
 const getCalculationHistory = async (req, res) => {
     try {
+        const { marketplace_id } = req.query;
         const connection = await db.getConnection();
-        const [rows] = await connection.query('SELECT * FROM shipment_calculations_master ORDER BY id DESC');
+        
+        let query = 'SELECT * FROM shipment_calculations_master';
+        const params = [];
+        
+        if (marketplace_id) {
+            query += ' WHERE marketplace_id = ?';
+            params.push(marketplace_id);
+        }
+        
+        query += ' ORDER BY id DESC';
+        
+        const [rows] = await connection.query(query, params);
         connection.release();
         return successResponse(res, "History fetched successfully", rows, 200);
     } catch (error) {

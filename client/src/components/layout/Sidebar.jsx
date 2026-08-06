@@ -1,5 +1,6 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import {
     LayoutDashboard,
     PieChart,
@@ -20,16 +21,20 @@ const navItems = [
 ];
 
 const Sidebar = () => {
+    const { user, logout } = useAuth();
+    const navigate = useNavigate();
+
+    const handleLogout = () => {
+        if (window.confirm("Are you sure you want to logout?")) {
+            logout();
+            navigate('/login');
+        }
+    };
     return (
         <div className="w-[260px] h-full bg-white border-r border-[#EAEBF3] flex flex-col">
             {/* Brand */}
             <div className="h-[76px] flex items-center px-6 border-b border-[#EAEBF3]">
-                <div className="flex items-center justify-center bg-[#5A5DF6] text-white w-9 h-9 rounded-[6px] shadow-sm shadow-[#5A5DF6]/25">
-                    <Hexagon size={20} fill="currentColor" />
-                </div>
-                <span className="ml-3 text-lg font-bold text-[#1C2340] tracking-wide">
-                    CRASOME
-                </span>
+                <img src="/crasome-logo.jpg" alt="Crasome Logo" className="h-10 object-contain" />
             </div>
 
             {/* Menu */}
@@ -72,13 +77,13 @@ const Sidebar = () => {
                     <span className="font-medium text-sm">Settings</span>
                 </NavLink>
 
-                {/* <NavLink
-                    to="/logout"
-                    className="flex items-center px-3 py-2.5 text-[#E74C3C] hover:bg-[#E74C3C]/8 rounded-[5px] transition-all"
+                <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center px-3 py-2.5 text-[#E74C3C] hover:bg-[#E74C3C]/8 rounded-[5px] transition-all"
                 >
                     <LogOut size={17} className="mr-3" />
                     <span className="font-medium text-sm">Logout</span>
-                </NavLink> */}
+                </button>
 
             </div>
         </div>

@@ -10,6 +10,9 @@ const manifestRoutes = require("./routes/manifest/manifest");
 const marketplaceRoutes = require("./routes/marketplace/marketplace");
 const settingsRoutes = require("./routes/settings/settings");
 const eventsRoutes = require("./routes/settings/events");
+const authRoutes = require("./routes/auth/auth");
+const usersRoutes = require("./routes/users/users");
+const { verifyToken } = require("./middleware/auth");
 
 const app = express();
 
@@ -20,13 +23,17 @@ app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 app.use(compression()); // Ye API response ko chota aur superfast bana dega
 
 
-app.use("/api", uploadRoutes);
-app.use("/api", calculationRoutes);
-app.use("/api", stockRoutes);  
-app.use("/api", manifestRoutes);
-app.use("/api", marketplaceRoutes);
-app.use("/api", settingsRoutes);
-app.use("/api/events", eventsRoutes);
+app.use("/api", authRoutes);
+app.use("/api", usersRoutes);
+
+// Protect existing routes
+app.use("/api", verifyToken, uploadRoutes);
+app.use("/api", verifyToken, calculationRoutes);
+app.use("/api", verifyToken, stockRoutes);  
+app.use("/api", verifyToken, manifestRoutes);
+app.use("/api", verifyToken, marketplaceRoutes);
+app.use("/api", verifyToken, settingsRoutes);
+app.use("/api/events", verifyToken, eventsRoutes);
 
 
 

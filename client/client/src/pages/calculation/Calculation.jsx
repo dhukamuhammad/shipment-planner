@@ -138,6 +138,7 @@ const Calculation = () => {
         setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
     };
     const shipmentMode = localStorage.getItem('shipment_mode') || 'IXD';
+    const [ixdName, setIxdName] = useState("");
 
     // Double click cell expand karne ke liye
     const [expandedCell, setExpandedCell] = useState({ rowId: null, colName: null });
@@ -181,8 +182,13 @@ const Calculation = () => {
             }
 
             const params = { _t: Date.now() };
-            if (urlPlanId) params.planId = urlPlanId;
-            else if (selectedHistoryPlanId) params.planId = selectedHistoryPlanId;
+            if (urlPlanId) {
+                params.planId = urlPlanId;
+            } else if (canAutoLoad) {
+                // Do not send planId; let backend auto-load Draft or auto-clone
+            } else if (selectedHistoryPlanId) {
+                params.planId = selectedHistoryPlanId;
+            }
 
             if (filterMarketplaceId) params.marketplace_id = filterMarketplaceId;
             params.shipment_mode = localStorage.getItem('shipment_mode') || 'IXD';
@@ -192,24 +198,25 @@ const Calculation = () => {
                 // Backend se Master aur Items alag alag aayenge
                 if (response.data.data.master) {
                     setMasterData(response.data.data.master);
-
-                    // RE-FETCH HISTORY TO SYNC DROPDOWN
-                    if (filterMarketplaceId) {
-                        try {
-                            const historyRes = await api.get('/history', { params: { marketplace_id: filterMarketplaceId } });
-                            if (historyRes.data?.success) {
-                                setHistoryPlans(historyRes.data.data);
-                                // Select the newly created plan in the dropdown
-                                if (canAutoLoad) {
-                                    handlePlanChange(response.data.data.master.id);
-                                }
-                            }
-                        } catch (e) {
-                            console.error("Failed to sync history", e);
-                        }
-                    }
                 } else {
                     setMasterData({});
+                }
+                setIxdName(response.data.data.ixdName || "");
+
+                // RE-FETCH HISTORY TO SYNC DROPDOWN
+                if (filterMarketplaceId) {
+                    try {
+                        const historyRes = await api.get('/history', { params: { marketplace_id: filterMarketplaceId } });
+                        if (historyRes.data?.success) {
+                            setHistoryPlans(historyRes.data.data);
+                            // Select the newly created plan in the dropdown
+                            if (canAutoLoad && response.data.data.master) {
+                                handlePlanChange(response.data.data.master.id);
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Failed to sync history", e);
+                    }
                 }
                 const fetchedItems = response.data.data.items || [];
                 const parsedItems = fetchedItems.map(item => {
@@ -1215,6 +1222,7 @@ const Calculation = () => {
     }, [filteredData, masterData]);
 
     const totalToShip = React.useMemo(() => {
+        const hasStockAllocation = filteredData.some(item => typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / '));
         return filteredData.reduce((total, item) => {
             let val = 0;
             if (shipmentMode === 'FC' && item.fc_breakdown) {
@@ -1228,12 +1236,12 @@ const Calculation = () => {
                 val = Number(item.final_wh);
             }
 
-            if (typeof item.stock_alloc === 'string') {
-                if (item.stock_alloc.includes(' / ')) {
+            if (hasStockAllocation) {
+                if (typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / ')) {
                     const alloc = Number(item.stock_alloc.split(' / ')[1]);
                     if (!isNaN(alloc)) val = alloc;
                 } else {
-                    val = 0; // Empty stock_alloc means 0 allocated
+                    val = 0; // Empty or null stock_alloc in Stock Mode means 0 allocated
                 }
             }
 
@@ -1242,6 +1250,7 @@ const Calculation = () => {
     }, [filteredData, shipmentMode]);
 
     const totalToSuggestShip = React.useMemo(() => {
+        const hasStockAllocation = filteredData.some(item => typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / '));
         return filteredData.reduce((total, item) => {
             let val = 0;
             if (shipmentMode === 'FC' && item.fc_breakdown) {
@@ -1255,12 +1264,12 @@ const Calculation = () => {
                 val = Number(item.suggest_final_wh);
             }
 
-            if (typeof item.stock_alloc === 'string') {
-                if (item.stock_alloc.includes(' / ')) {
+            if (hasStockAllocation) {
+                if (typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / ')) {
                     const alloc = Number(item.stock_alloc.split(' / ')[1]);
                     if (!isNaN(alloc)) val = alloc;
                 } else {
-                    val = 0; // Empty stock_alloc means 0 allocated
+                    val = 0; // Empty or null stock_alloc in Stock Mode means 0 allocated
                 }
             }
 
@@ -1305,8 +1314,36 @@ const Calculation = () => {
         if (initWHSpan > 0) total += collapsedGroups.initialWH ? 40 : ((visibleColumns.int_wh ? w.int_wh : 0) + (visibleColumns.dec_wh ? w.dec_wh : 0) + (visibleColumns.non_apron_qty ? w.non_apron_qty : 0));
         if (variantsSpan > 0) total += collapsedGroups.variants ? 40 : ((visibleColumns.sky_blue ? w.sky_blue : 0) + (visibleColumns.dark_blue ? w.dark_blue : 0) + (visibleColumns.brown ? w.brown : 0) + (visibleColumns.green ? w.green : 0) + (visibleColumns.tan ? w.tan : 0) + (visibleColumns.black ? w.black : 0) + (visibleColumns.red ? w.red : 0) + (visibleColumns.grey ? w.grey : 0));
         if (specsSpan > 0) total += collapsedGroups.specs ? 40 : ((visibleColumns.weight ? w.weight : 0) + (visibleColumns.total_weight ? w.total_weight : 0) + (visibleColumns.hsn ? w.hsn : 0) + (visibleColumns.gst ? w.gst : 0) + (visibleColumns.cost ? w.cost : 0));
+        if (logisticsSpan > 0) total += collapsedGroups.logistics ? 40 : ((visibleColumns.ref_sku ? w.ref_sku : 0) + (visibleColumns.ref_title ? w.ref_title : 0) + (visibleColumns.tra_qty ? w.tra_qty : 0) + (visibleColumns.quantity ? w.quantity : 0) + (visibleColumns.available_qty ? w.available_qty : 0) + (visibleColumns.fc_id && (shipmentMode === 'FC' || shipmentMode === 'IXD') ? w.fc_id : 0) + (visibleColumns.sale_wh ? w.sale_wh : 0) + (visibleColumns.sale_wh_avg ? w.sale_wh_avg : 0) + (visibleColumns.ship_wh ? w.ship_wh : 0) + (visibleColumns.sum_val ? w.sum_val : 0) + (visibleColumns.stock_alloc ? w.stock_alloc : 0) + (visibleColumns.final_wh ? w.final_wh : 0) + (visibleColumns.suggest_final_wh ? w.suggest_final_wh : 0));
 
         return total;
+    };
+
+    // --- Table Drag to Scroll Logic ---
+    const tableContainerRef = useRef(null);
+    const [isDraggingTable, setIsDraggingTable] = useState(false);
+    const [dragStartX, setDragStartX] = useState(0);
+    const [dragScrollLeft, setDragScrollLeft] = useState(0);
+
+    const handleMouseDownTable = (e) => {
+        const tagName = e.target.tagName.toLowerCase();
+        if (['input', 'button', 'a', 'select', 'textarea'].includes(tagName)) return;
+        if (e.target.className && typeof e.target.className === 'string' && e.target.className.includes('cursor-col-resize')) return;
+
+        setIsDraggingTable(true);
+        setDragStartX(e.pageX - tableContainerRef.current.offsetLeft);
+        setDragScrollLeft(tableContainerRef.current.scrollLeft);
+    };
+
+    const handleMouseLeaveTable = () => setIsDraggingTable(false);
+    const handleMouseUpTable = () => setIsDraggingTable(false);
+
+    const handleMouseMoveTable = (e) => {
+        if (!isDraggingTable || !tableContainerRef.current) return;
+        e.preventDefault();
+        const x = e.pageX - tableContainerRef.current.offsetLeft;
+        const walk = (x - dragStartX) * 1.5; // Scroll speed multiplier
+        tableContainerRef.current.scrollLeft = dragScrollLeft - walk;
     };
 
     // 🔥 EXCEL-LIKE COLUMN RESIZE ENGINE — <col> aur table dono ki width update karega (real shrink, no redistribution)
@@ -1375,7 +1412,7 @@ const Calculation = () => {
     const initWHSpan = getColSpan(['int_wh', 'dec_wh', 'non_apron_qty']);
     const variantsSpan = getColSpan(['sky_blue', 'dark_blue', 'brown', 'green', 'tan', 'black', 'red', 'grey'].filter(c => activeVariantCols[c]));
     const specsSpan = getColSpan(['weight', 'total_weight', 'hsn', 'gst', 'cost']);
-    const logisticsSpan = getColSpan(['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', /*'sale_total',*/ 'sale_wh', 'sale_wh_avg', 'ship_wh', 'sum_val', 'final_wh', 'suggest_final_wh', 'stock_alloc']) + (shipmentMode === 'FC' ? 1 : 0);
+    const logisticsSpan = getColSpan(['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', /*'sale_total',*/ 'sale_wh', 'sale_wh_avg', 'ship_wh', 'sum_val', 'final_wh', 'suggest_final_wh', 'stock_alloc']) + (visibleColumns.fc_id && (shipmentMode === 'FC' || shipmentMode === 'IXD') ? 1 : 0);
 
     // 🔥 NAYA: Group Checkbox Toggle Logic
     const colGroupsConfig = {
@@ -1383,7 +1420,7 @@ const Calculation = () => {
         initialWH: ['int_wh', 'dec_wh', 'non_apron_qty'],
         variants: ['sky_blue', 'dark_blue', 'brown', 'green', 'tan', 'black', 'red', 'grey'],
         specs: ['weight', 'total_weight', 'hsn', 'gst', 'cost'],
-        logistics: ['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', /*'sale_total',*/ 'sale_wh', 'sale_wh_avg', 'ship_wh', 'sum_val', 'final_wh', 'suggest_final_wh', 'stock_alloc']
+        logistics: ['ref_sku', 'ref_title', 'tra_qty', 'quantity', 'available_qty', 'fc_id', /*'sale_total',*/ 'sale_wh', 'sale_wh_avg', 'ship_wh', 'sum_val', 'final_wh', 'suggest_final_wh', 'stock_alloc']
     };
 
     const handleGroupToggle = (groupKey, isChecked) => {
@@ -1776,7 +1813,15 @@ const Calculation = () => {
                     </div>
 
                     {/* 🔥 COMPLETE EXCEL-STYLE TABLE WITH FILTER & ACTIONS 🔥 */}
-                    <div className="w-full overflow-x-auto overflow-y-auto custom-scrollbar bg-white" style={{ height: 'calc(100vh - 180px)' }}>
+                    <div 
+                        ref={tableContainerRef}
+                        onMouseDown={handleMouseDownTable}
+                        onMouseLeave={handleMouseLeaveTable}
+                        onMouseUp={handleMouseUpTable}
+                        onMouseMove={handleMouseMoveTable}
+                        className={`w-full overflow-x-auto overflow-y-auto custom-scrollbar bg-white ${isDraggingTable ? 'cursor-grabbing select-none' : 'cursor-grab'}`} 
+                        style={{ height: 'calc(100vh - 180px)' }}
+                    >
                         {filteredData.length === 0 ? (
                             <div className="flex justify-center items-center h-full min-h-[300px]">
                                 <p className="text-sm text-[#1C2340]/50 font-medium py-10">No data found in database. Please upload a report.</p>
@@ -1826,7 +1871,7 @@ const Calculation = () => {
                                         {visibleColumns.tra_qty && <col ref={el => colRefs.current.tra_qty = el} style={{ width: colWidthsRef.current.tra_qty }} />}
                                         {visibleColumns.quantity && <col ref={el => colRefs.current.quantity = el} style={{ width: colWidthsRef.current.quantity }} />}
                                         {visibleColumns.available_qty && <col ref={el => colRefs.current.available_qty = el} style={{ width: colWidthsRef.current.available_qty }} />}
-                                        {shipmentMode === 'FC' && <col style={{ width: 100 }} />}
+                                        {visibleColumns.fc_id && (shipmentMode === 'FC' || shipmentMode === 'IXD') && <col ref={el => colRefs.current.fc_id = el} style={{ width: colWidthsRef.current.fc_id }} />}
                                         {visibleColumns.sale_wh_avg && <col ref={el => colRefs.current.sale_wh_avg = el} style={{ width: colWidthsRef.current.sale_wh_avg }} />}
                                         {visibleColumns.sale_wh && <col ref={el => colRefs.current.sale_wh = el} style={{ width: colWidthsRef.current.sale_wh }} />}
                                         {visibleColumns.ship_wh && <col ref={el => colRefs.current.ship_wh = el} style={{ width: colWidthsRef.current.ship_wh }} />}
@@ -1961,7 +2006,7 @@ const Calculation = () => {
                                                 {visibleColumns.tra_qty && <th style={{ width: colWidthsRef.current.tra_qty, minWidth: colWidthsRef.current.tra_qty }} className="px-4 py-3 text-center bg-orange-50 relative group">Tra. Qty<div onMouseDown={handleResizeMouseDown('tra_qty')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                                 {visibleColumns.quantity && <th style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center bg-orange-50 relative group">DIH Quantity<div onMouseDown={handleResizeMouseDown('quantity')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                                 {visibleColumns.available_qty && <th style={{ width: colWidthsRef.current.available_qty, minWidth: colWidthsRef.current.available_qty }} className="px-4 py-3 text-center bg-orange-50 text-[#5A5DF6] font-bold relative group">Available Qty<div onMouseDown={handleResizeMouseDown('available_qty')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
-                                                {shipmentMode === 'FC' && <th style={{ width: 100, minWidth: 100 }} className="px-4 py-3 text-center bg-orange-50 text-[#1C2340] font-bold">FC</th>}
+                                                {visibleColumns.fc_id && (shipmentMode === 'FC' || shipmentMode === 'IXD') && <th style={{ width: colWidthsRef.current.fc_id, minWidth: colWidthsRef.current.fc_id }} className="px-4 py-3 text-center bg-orange-50 text-[#1C2340] font-bold relative group">FC<div onMouseDown={handleResizeMouseDown('fc_id')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                                 {/* {visibleColumns.sale_total && <th style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-Total<div onMouseDown={handleResizeMouseDown('sale_total')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>} */}
                                                 {visibleColumns.sale_wh_avg && <th style={{ width: colWidthsRef.current.sale_wh_avg, minWidth: colWidthsRef.current.sale_wh_avg }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-WH(4 MOS AVG)<div onMouseDown={handleResizeMouseDown('sale_wh_avg')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
                                                 {visibleColumns.sale_wh && <th style={{ width: colWidthsRef.current.sale_wh, minWidth: colWidthsRef.current.sale_wh }} className="px-4 py-3 text-center bg-orange-50 relative group">Sale-WH-CUR<div onMouseDown={handleResizeMouseDown('sale_wh')} className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#D9DDE5] cursor-col-resize hover:bg-[#5A5DF6] z-30" /></th>}
@@ -2107,7 +2152,8 @@ const Calculation = () => {
                                                             {visibleColumns.tra_qty && <td style={{ width: colWidthsRef.current.tra_qty, minWidth: colWidthsRef.current.tra_qty }} className="px-4 py-3 text-center font-semibold text-[#5A5DF6]">{row.tra_qty}</td>}
                                                             {visibleColumns.quantity && <td style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center">{row.quantity}</td>}
                                                             {visibleColumns.available_qty && <td style={{ width: colWidthsRef.current.available_qty, minWidth: colWidthsRef.current.available_qty }} className="px-4 py-3 text-center font-bold text-[#1C2340] bg-[#F4F5F7]/50">{row.available_qty}</td>}
-                                                            {shipmentMode === 'FC' && <td style={{ width: 100, minWidth: 100 }} className="px-4 py-3 text-center font-bold text-gray-400 bg-[#F4F5F7]/20">-</td>}
+                                                            {visibleColumns.fc_id && shipmentMode === 'FC' && <td style={{ width: colWidthsRef.current.fc_id, minWidth: colWidthsRef.current.fc_id }} className="px-4 py-3 text-center font-bold text-gray-400 bg-[#F4F5F7]/20">-</td>}
+                                                            {visibleColumns.fc_id && shipmentMode === 'IXD' && <td style={{ width: colWidthsRef.current.fc_id, minWidth: colWidthsRef.current.fc_id }} className="px-4 py-3 text-center font-bold text-[#5A5DF6] bg-blue-50/20">{ixdName}</td>}
 
                                                             {/* {visibleColumns.sale_total && <td style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center">{row.sale_total}</td>} */}
                                                             {visibleColumns.sale_wh_avg && <td style={{ width: colWidthsRef.current.sale_wh_avg, minWidth: colWidthsRef.current.sale_wh_avg }} className="px-4 py-3 text-center font-medium text-[#1C2340] bg-orange-50/20">{row.sale_wh_avg}</td>}
@@ -2298,7 +2344,7 @@ const Calculation = () => {
                                                                             {visibleColumns.tra_qty && <col style={{ width: colWidthsRef.current.tra_qty }} />}
                                                                             {visibleColumns.quantity && <col style={{ width: colWidthsRef.current.quantity }} />}
                                                                             {visibleColumns.available_qty && <col style={{ width: colWidthsRef.current.available_qty }} />}
-                                                                            {shipmentMode === 'FC' && <col style={{ width: 100 }} />}
+                                                                            {visibleColumns.fc_id && (shipmentMode === 'FC' || shipmentMode === 'IXD') && <col style={{ width: colWidthsRef.current.fc_id }} />}
                                                                             {visibleColumns.sale_wh_avg && <col style={{ width: colWidthsRef.current.sale_wh_avg }} />}
                                                                             {visibleColumns.sale_wh && <col style={{ width: colWidthsRef.current.sale_wh }} />}
                                                                             {visibleColumns.ship_wh && <col style={{ width: colWidthsRef.current.ship_wh }} />}
@@ -2360,7 +2406,7 @@ const Calculation = () => {
                                                                                     {visibleColumns.tra_qty && <td className="px-4 py-2 text-center font-semibold text-[#5A5DF6]">{data.tra_qty}</td>}
                                                                                     {visibleColumns.quantity && <td className="px-4 py-2 text-center font-medium">{data.quantity}</td>}
                                                                                     {visibleColumns.available_qty && <td className="px-4 py-2 text-center font-bold text-[#1C2340] bg-[#F4F5F7]/50">{data.available_qty}</td>}
-                                                                                    {shipmentMode === 'FC' && <td className="px-4 py-2 text-center font-bold text-[#5A5DF6] bg-blue-50/20">{fcName}</td>}
+                                                                                    {visibleColumns.fc_id && shipmentMode === 'FC' && <td className="px-4 py-2 text-center font-bold text-[#5A5DF6] bg-blue-50/20">{fcName}</td>}
                                                                                     {visibleColumns.sale_wh_avg && <td className="px-4 py-2 text-center font-medium text-[#1C2340] bg-orange-50/20">{data.sale_wh_avg}</td>}
                                                                                     {visibleColumns.sale_wh && <td className="px-4 py-2 text-center">{data.sale_wh}</td>}
                                                                                     {visibleColumns.ship_wh && <td className="px-4 py-2 text-center">{liveAfsDays > 0 ? Math.ceil(((data.sale_wh / liveAfsDays) * livePlanDays) - data.available_qty) : 0}</td>}
@@ -2847,7 +2893,7 @@ const Calculation = () => {
                                     <span className="text-[10px] font-bold text-[#1C2340]/50 uppercase tracking-wider group-hover:text-[#5A5DF6] transition-colors">Logistics</span>
                                 </label>
                                 <div className="space-y-2.5">
-                                    {[['ref_sku', 'SKU (Ref)'], ['ref_title', 'Title (Ref)'], ['tra_qty', 'Tra. Qty'], ['quantity', 'Quantity'], ['available_qty', 'Available Qty'], ['FC ID'], /*['sale_total', 'Sale-Total'],*/['sale_wh', 'Sale-WH'], ['ship_wh', 'Ship-WH'], ['sum_val', 'Sum'], ['stock_alloc', 'Allocated Stock'], ['final_wh', 'Final-WH']].map(([k, l]) => (
+                                    {[['ref_sku', 'SKU (Ref)'], ['ref_title', 'Title (Ref)'], ['tra_qty', 'Tra. Qty'], ['quantity', 'Quantity'], ['available_qty', 'Available Qty'], ['fc_id', 'FC ID'], /*['sale_total', 'Sale-Total'],*/['sale_wh', 'Sale-WH'], ['ship_wh', 'Ship-WH'], ['sum_val', 'Sum'], ['stock_alloc', 'Allocated Stock'], ['final_wh', 'Final-WH']].map(([k, l]) => (
                                         <label key={k} className="flex items-center gap-2 cursor-pointer group">
                                             <input type="checkbox" checked={visibleColumns[k]} onChange={() => handleColumnToggle(k)} className="w-3.5 h-3.5 accent-[#5A5DF6] cursor-pointer" />
                                             <span className="text-[11px] font-medium text-[#1C2340]/80 group-hover:text-[#5A5DF6] transition-colors">{l}</span>
