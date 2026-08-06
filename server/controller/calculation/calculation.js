@@ -800,10 +800,16 @@ const getCalculationData = async (req, res) => {
 
         // --- FETCH ACTIVE WAREHOUSES FOR FC MODE ---
         let activeFCs = [];
+        let activeIXD = null;
         if (shipmentMode === 'FC') {
             if (masterData.marketplace_id) {
                 const [fcs] = await connection.query("SELECT name FROM ixd_warehouses WHERE type = 'Warehouse' AND marketplace_id = ? AND is_active = 1", [masterData.marketplace_id]);
                 activeFCs = fcs.map(f => f.name);
+            }
+        } else if (shipmentMode === 'IXD') {
+            if (masterData.marketplace_id) {
+                const [ixds] = await connection.query("SELECT name FROM ixd_warehouses WHERE type = 'IXD' AND marketplace_id = ? AND is_active = 1 LIMIT 1", [masterData.marketplace_id]);
+                if (ixds.length > 0) activeIXD = ixds[0].name;
             }
         }
 
@@ -1023,7 +1029,8 @@ const getCalculationData = async (req, res) => {
 
         return successResponse(res, "Data fetched successfully", {
             master: masterData,
-            items: itemsWithTraQty
+            items: itemsWithTraQty,
+            ixdName: activeIXD
         }, 200);
 
     } catch (error) {
@@ -1173,8 +1180,20 @@ const getManifestDetails = async (req, res) => {
 // =======================================================
 const getCalculationHistory = async (req, res) => {
     try {
+        const { marketplace_id } = req.query;
         const connection = await db.getConnection();
-        const [rows] = await connection.query('SELECT * FROM shipment_calculations_master ORDER BY id DESC');
+        
+        let query = 'SELECT * FROM shipment_calculations_master';
+        const params = [];
+        
+        if (marketplace_id) {
+            query += ' WHERE marketplace_id = ?';
+            params.push(marketplace_id);
+        }
+        
+        query += ' ORDER BY id DESC';
+        
+        const [rows] = await connection.query(query, params);
         connection.release();
         return successResponse(res, "History fetched successfully", rows, 200);
     } catch (error) {

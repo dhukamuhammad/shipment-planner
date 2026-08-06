@@ -59,6 +59,19 @@ const Upload = () => {
         if (files.length === 0) return alert("Pehle files select karein!");
         if (!selectedMarketplaceId) return alert("Please select a marketplace first!");
 
+        try {
+            // Check if there is an active draft for this marketplace
+            const historyRes = await api.get('/history', { params: { marketplace_id: selectedMarketplaceId } });
+            if (historyRes.data?.success) {
+                const draftExists = historyRes.data.data.some(plan => plan.status === 'Draft');
+                if (draftExists) {
+                    return alert("Ek Draft shipment plan already maujood hai! Kripya pehle Calculation page par jaa kar use Manifest (download) karein, uske baad hi naya plan banayein.");
+                }
+            }
+        } catch (error) {
+            console.error("Failed to check draft status:", error);
+        }
+
         setIsUploading(true);
         // Per-file result tracking
         const results = [];

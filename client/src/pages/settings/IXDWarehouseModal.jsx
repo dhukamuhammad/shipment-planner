@@ -61,9 +61,15 @@ const IXDWarehouseModal = ({ isOpen, onClose }) => {
             setWarehouses(prev => {
                 const updated = { ...prev };
                 if (updated[type] && updated[type][platform]) {
-                    updated[type][platform] = updated[type][platform].map(wh => 
-                        wh.id === id ? { ...wh, is_active: newStatus } : wh
-                    );
+                    if (type === 'IXD' && newStatus === true) {
+                        updated[type][platform] = updated[type][platform].map(wh => 
+                            wh.id === id ? { ...wh, is_active: true } : { ...wh, is_active: false }
+                        );
+                    } else {
+                        updated[type][platform] = updated[type][platform].map(wh => 
+                            wh.id === id ? { ...wh, is_active: newStatus } : wh
+                        );
+                    }
                 }
                 return updated;
             });
