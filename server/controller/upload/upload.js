@@ -353,7 +353,7 @@ const uploadBusinessReport = async (req, res) => {
         const fileExt = path.extname(req.file.originalname).toLowerCase();
 
         const marketplace_id = req.body.marketplace_id || null;
-        
+
         // 1. Master report table mein Business entry create karein
         const [masterResult] = await connection.query(
             `INSERT INTO uploaded_reports (file_name, report_type, file_size, status, marketplace_id)
@@ -549,14 +549,14 @@ const uploadDIHReport = async (req, res) => {
         const [oldDihReports] = await connection.query(`SELECT id, file_name FROM uploaded_reports WHERE report_type = 'DIH'`);
         if (oldDihReports.length > 0) {
             const oldIds = oldDihReports.map(r => r.id);
-            
+
             // Delete files from storage (now in server/uploads/)
             oldDihReports.forEach((report) => {
                 const oldFilePath = path.join(__dirname, "../uploads", report.file_name);
                 if (fs.existsSync(oldFilePath)) {
                     try {
                         fs.unlinkSync(oldFilePath);
-                    } catch(err) {
+                    } catch (err) {
                         console.error("Failed to delete old DIH file:", err);
                     }
                 }
@@ -737,7 +737,7 @@ const getRecentUploads = async (req, res) => {
     try {
         const connection = await db.getConnection();
         const [rows] = await connection.query(
-            `SELECT r.id, r.file_name, r.report_type, r.file_size, r.status, r.uploaded_at, m.name as marketplace 
+            `SELECT r.id, r.marketplace_id, r.file_name, r.report_type, r.file_size, r.status, r.uploaded_at, m.name as marketplace  
              FROM uploaded_reports r
              LEFT JOIN marketplaces m ON r.marketplace_id = m.id
              WHERE r.report_type NOT IN ('Calculation', 'Manifest_Template') AND r.is_manifested = 0
@@ -759,8 +759,8 @@ const deleteReport = async (req, res) => {
         const reportId = req.params.id;
         connection = await db.getConnection();
 
-        // 1. Pehle file ka naam nikal lo taaki storage se delete kar sakein
-        const [rows] = await connection.query(`SELECT file_name FROM uploaded_reports WHERE id = ?`, [reportId]);
+        // 1. Pehle file ka naam aur marketplace nikal lo taaki storage aur draft plan delete kar sakein
+        const [rows] = await connection.query(`SELECT file_name, marketplace_id FROM uploaded_reports WHERE id = ?`, [reportId]);
 
         if (rows.length === 0) {
             connection.release();
@@ -768,9 +768,24 @@ const deleteReport = async (req, res) => {
         }
 
         const fileName = rows[0].file_name;
-
+        const marketplaceId = rows[0].marketplace_id;
         // 2. Database se delete karo (ON DELETE CASCADE automatically baaki tables saaf kar dega)
         await connection.query(`DELETE FROM uploaded_reports WHERE id = ?`, [reportId]);
+
+        // 2.5 🧹 AUTO-CLEANUP: Agar is marketplace ka koi fasa hua "Draft" plan hai, usko bhi uda do taaki block na ho
+        if (marketplaceId) {
+            const [draftPlans] = await connection.query(`
+                SELECT id FROM shipment_calculations_master 
+                WHERE status = 'Draft' AND marketplace_id = ?
+            `, [marketplaceId]);
+
+            for (const plan of draftPlans) {
+                // Pehle items delete karo, phir master plan
+                await connection.query('DELETE FROM shipment_calculation_items WHERE plan_id = ?', [plan.id]);
+                await connection.query('DELETE FROM shipment_calculations_master WHERE id = ?', [plan.id]);
+            }
+        }
+
         connection.release();
 
         // 3. Server (server/uploads/ folder) se physical file ko bhi uda do taaki storage full na ho
@@ -892,58 +907,60 @@ const uploadTransitShipmentReport = async (req, res) => {
             // ExcelJS ke liye Smart Scanner
             const workbook = new ExcelJS.Workbook();
             await workbook.xlsx.readFile(req.file.path);
-            const worksheet = workbook.worksheets[0];
-
             let sheetHeaders = [];
             let headerFound = false;
 
-            worksheet.eachRow({ includeEmpty: true }, (row) => {
-                if (!row.hasValues) return;
+            for (const worksheet of workbook.worksheets) {
+                if (headerFound) break; // Stop checking other sheets if we already found the right one
 
-                if (!headerFound) {
-                    let tempHeaders = [];
-                    let hasSku = false;
+                worksheet.eachRow({ includeEmpty: true }, (row) => {
+                    if (!row.hasValues) return;
 
-                    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-                        let val = extractCellValue(cell);
-                        if (val) {
-                            const txt = val.toLowerCase();
-                            // Excel cells se Global Defaults read kar rahe hain
-                            if (txt.includes("default prep owner")) {
-                                const nextCell = row.getCell(colNumber + 1);
-                                globalDefaultPrepOwner = nextCell && nextCell.value ? nextCell.value.toString().trim() : null;
-                            }
-                            if (txt.includes("default labeling owner")) {
-                                const nextCell = row.getCell(colNumber + 1);
-                                globalDefaultLabelingOwner = nextCell && nextCell.value ? nextCell.value.toString().trim() : null;
-                            }
-                            if (txt.includes("default prep category")) {
-                                const nextCell = row.getCell(colNumber + 1);
-                                globalDefaultPrepCategory = nextCell && nextCell.value ? nextCell.value.toString().trim() : null;
-                            }
-                        }
-                        tempHeaders[colNumber] = val;
-                        if (val && val.toLowerCase().includes("merchant sku")) {
-                            hasSku = true;
-                        }
-                    });
+                    if (!headerFound) {
+                        let tempHeaders = [];
+                        let hasSku = false;
 
-                    if (hasSku) {
-                        headerFound = true;
-                        sheetHeaders = tempHeaders;
-                    }
-                } else {
-                    let obj = {};
-                    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-                        const header = sheetHeaders[colNumber];
-                        if (header) {
+                        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
                             let val = extractCellValue(cell);
-                            obj[header] = val !== "" ? val : null;
+                            if (val) {
+                                const txt = val.toLowerCase();
+                                // Excel cells se Global Defaults read kar rahe hain
+                                if (txt.includes("default prep owner")) {
+                                    const nextCell = row.getCell(colNumber + 1);
+                                    globalDefaultPrepOwner = nextCell && nextCell.value ? nextCell.value.toString().trim() : null;
+                                }
+                                if (txt.includes("default labeling owner")) {
+                                    const nextCell = row.getCell(colNumber + 1);
+                                    globalDefaultLabelingOwner = nextCell && nextCell.value ? nextCell.value.toString().trim() : null;
+                                }
+                                if (txt.includes("default prep category")) {
+                                    const nextCell = row.getCell(colNumber + 1);
+                                    globalDefaultPrepCategory = nextCell && nextCell.value ? nextCell.value.toString().trim() : null;
+                                }
+                            }
+                            tempHeaders[colNumber] = val;
+                            if (val && val.toLowerCase().includes("merchant sku")) {
+                                hasSku = true;
+                            }
+                        });
+
+                        if (hasSku) {
+                            headerFound = true;
+                            sheetHeaders = tempHeaders;
                         }
-                    });
-                    rawData.push(obj);
-                }
-            });
+                    } else {
+                        let obj = {};
+                        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                            const header = sheetHeaders[colNumber];
+                            if (header) {
+                                let val = extractCellValue(cell);
+                                obj[header] = val !== "" ? val : null;
+                            }
+                        });
+                        rawData.push(obj);
+                    }
+                });
+            }
         }
         console.timeEnd("⏳ TIMER 1: Transit File Parsing");
 
@@ -1008,14 +1025,14 @@ const uploadTransitShipmentReport = async (req, res) => {
             WHERE report_type = 'Transit Shipment' 
             AND uploaded_at < DATE_SUB(NOW(), INTERVAL 4 MONTH)
         `);
-        
+
         if (oldTransitReports.length > 0) {
             const oldIds = oldTransitReports.map(r => r.id);
             // Delete physical files (now in server/uploads/)
             oldTransitReports.forEach((report) => {
                 const oldFilePath = path.join(__dirname, "../uploads", report.file_name);
                 if (fs.existsSync(oldFilePath)) {
-                    try { fs.unlinkSync(oldFilePath); } catch(err) { console.error("Failed to delete old Transit file:", err); }
+                    try { fs.unlinkSync(oldFilePath); } catch (err) { console.error("Failed to delete old Transit file:", err); }
                 }
             });
             // Delete from database (Cascade deletes data)
@@ -1112,7 +1129,7 @@ const uploadStockAvailabilityReport = async (req, res) => {
         const categoryIdx = sheetHeaders.findIndex(h => h.includes('category'));
         const ownerIdx = sheetHeaders.findIndex(h => h.includes('owner'));
         const avgQtyIdx = sheetHeaders.findIndex(h => h.includes('avg'));
-        
+
         if (groupNameIdx === -1 || availQtyIdx === -1) {
             throw new Error(`[Stock Availability] Header mismatch! Required columns ("Model"/"Group Name" and "Balance"/"Available Qty") not found in Stock file. Found columns: ${sheetHeaders.filter(Boolean).slice(0, 8).join(', ')}`);
         }
@@ -1126,22 +1143,23 @@ const uploadStockAvailabilityReport = async (req, res) => {
 
             const availQtyStr = row[availQtyIdx] || '0';
             const availQty = parseInt(availQtyStr.replace(/[^0-9.-]/g, ''), 10) || 0;
-            
+
             const category = categoryIdx !== -1 ? (row[categoryIdx] || null) : null;
             const owner = ownerIdx !== -1 ? (row[ownerIdx] || null) : null;
-            
+
             const reqStockStr = reqStockIdx !== -1 ? (row[reqStockIdx] || '0') : '0';
             const reqStock = parseInt(reqStockStr.replace(/[^0-9.-]/g, ''), 10) || 0;
-            
+
             const avgQtyStr = avgQtyIdx !== -1 ? (row[avgQtyIdx] || '0') : '0';
             const avgQty = parseFloat(avgQtyStr.replace(/[^0-9.-]/g, '')) || 0.0;
 
-            bulkValues.push([reportId, groupName, category, owner, reqStock, avgQty, availQty]);
+            bulkValues.push([reportId, groupName, category, owner, reqStock, avgQty, availQty, 0, availQty]);
+
         }
 
         if (bulkValues.length > 0) {
             const CHUNK_SIZE = 500;
-            const insertQuery = 'INSERT INTO stock_availability (upload_id, group_name, category, owner, req_stock, avg_qty, available_qty) VALUES ?';
+            const insertQuery = 'INSERT INTO stock_availability (upload_id, group_name, category, owner, req_stock, avg_qty, original_available_qty, incoming_production_stock, available_qty) VALUES ?';
             for (let i = 0; i < bulkValues.length; i += CHUNK_SIZE) {
                 const chunk = bulkValues.slice(i, i + CHUNK_SIZE);
                 await connection.query(insertQuery, [chunk]);

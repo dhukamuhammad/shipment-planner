@@ -4,7 +4,7 @@ import {
     Search, Download, CalendarDays, Truck, Layers, Package,
     Plus, Upload, SlidersHorizontal, X, Loader2, UploadCloud,
     TrendingDown, TrendingUp, RefreshCcw, ChevronLeft, ChevronRight,
-    Pencil, Trash2, Check, X as CloseIcon, MoreVertical, ChevronDown, Bell, BellRing, FileText, Scan, Eye, EyeOff, AlertCircle
+    Pencil, Trash2, Check, X as CloseIcon, MoreVertical, ChevronDown, Bell, BellRing, FileText, Scan, Eye, EyeOff, AlertCircle, Hand, MousePointer2
 } from 'lucide-react';
 import api from '../../services/api';
 import MarketplaceDropdown from '../../components/MarketplaceDropdown';
@@ -859,7 +859,7 @@ const Calculation = () => {
 
             let shipWh = 0;
             let suggestedShipWh = 0;
-            
+
             if (item.fc_breakdown && typeof item.fc_breakdown === 'object' && Object.keys(item.fc_breakdown).length > 0) {
                 let fcShipWhSum = 0;
                 let fcSuggestedShipWhSum = 0;
@@ -1228,7 +1228,8 @@ const Calculation = () => {
             if (shipmentMode === 'FC' && item.fc_breakdown) {
                 let fcSum = 0;
                 Object.values(item.fc_breakdown).forEach(fcData => {
-                    const fcVal = Number(fcData.final_wh);
+                    const rawFinalWh = fcData.final_wh === "" || fcData.final_wh === undefined ? fcData.suggest_final_wh : fcData.final_wh;
+                    const fcVal = Number(rawFinalWh);
                     fcSum += isNaN(fcVal) ? 0 : fcVal;
                 });
                 val = fcSum;
@@ -1236,7 +1237,7 @@ const Calculation = () => {
                 val = Number(item.final_wh);
             }
 
-            if (hasStockAllocation) {
+            if (hasStockAllocation && shipmentMode !== 'FC') {
                 if (typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / ')) {
                     const alloc = Number(item.stock_alloc.split(' / ')[1]);
                     if (!isNaN(alloc)) val = Math.max(0, alloc);
@@ -1264,7 +1265,7 @@ const Calculation = () => {
                 val = Number(item.suggest_final_wh);
             }
 
-            if (hasStockAllocation) {
+            if (hasStockAllocation && shipmentMode !== 'FC') {
                 if (typeof item.stock_alloc === 'string' && item.stock_alloc.includes(' / ')) {
                     const alloc = Number(item.stock_alloc.split(' / ')[1]);
                     if (!isNaN(alloc)) val = Math.max(0, alloc);
@@ -1324,8 +1325,11 @@ const Calculation = () => {
     const [isDraggingTable, setIsDraggingTable] = useState(false);
     const [dragStartX, setDragStartX] = useState(0);
     const [dragScrollLeft, setDragScrollLeft] = useState(0);
+    const [isHandMode, setIsHandMode] = useState(false); // Hand mode toggle state
+
 
     const handleMouseDownTable = (e) => {
+        if (!isHandMode) return; // Sirf tabhi drag hoga jab Hand mode ON hoga
         const tagName = e.target.tagName.toLowerCase();
         if (['input', 'button', 'a', 'select', 'textarea'].includes(tagName)) return;
         if (e.target.className && typeof e.target.className === 'string' && e.target.className.includes('cursor-col-resize')) return;
@@ -1339,7 +1343,7 @@ const Calculation = () => {
     const handleMouseUpTable = () => setIsDraggingTable(false);
 
     const handleMouseMoveTable = (e) => {
-        if (!isDraggingTable || !tableContainerRef.current) return;
+        if (!isHandMode || !isDraggingTable || !tableContainerRef.current) return;
         e.preventDefault();
         const x = e.pageX - tableContainerRef.current.offsetLeft;
         const walk = (x - dragStartX) * 1.5; // Scroll speed multiplier
@@ -1482,6 +1486,7 @@ const Calculation = () => {
 
                     <div className="w-px h-5 bg-[#D9DDE5]"></div>
 
+
                     <div className="flex items-center gap-2">
                         <Truck size={14} className="text-[#5A5DF6]" />
                         <span className="text-[11px] font-bold text-[#1C2340]/60 uppercase tracking-wider">Shipment Plan</span>
@@ -1622,31 +1627,31 @@ const Calculation = () => {
                                                     if (typeof parsedFcBreakdown === 'string') {
                                                         parsedFcBreakdown = JSON.parse(parsedFcBreakdown); // double parse in case of double stringified
                                                     }
-                                                } catch(e) {
+                                                } catch (e) {
                                                     console.error("Parse error for sku:", item.sku, e);
                                                 }
                                                 console.log("manifest sku:", item.sku, "fc_breakdown orig:", item.fc_breakdown, "parsed:", parsedFcBreakdown);
-                                                
+
                                                 if (parsedFcBreakdown && typeof parsedFcBreakdown === 'object') {
                                                     Object.entries(parsedFcBreakdown).forEach(([fc, data]) => {
                                                         const finalWh = data.final_wh !== undefined && data.final_wh !== "" ? Number(data.final_wh) : Number(data.suggest_final_wh || 0);
                                                         if (finalWh > 0) {
-                                                        manifestSkus.push({
-                                                            sku: item.sku,
-                                                            quantity: finalWh,
-                                                            fc: fc,
-                                                            hsn_sac_code: item.hsn,
-                                                            gst_rate: item.gst,
-                                                            declared_value_per_unit: item.cost,
-                                                            weightPerPiece: item.weight,
-                                                            group_name: item.group_name,
-                                                            category: item.category,
-                                                            fnsku: item.fnsku || '',
-                                                            mrp: item.mrp || 0,
-                                                            title: item.title || ''
-                                                        });
-                                                    }
-                                                });
+                                                            manifestSkus.push({
+                                                                sku: item.sku,
+                                                                quantity: finalWh,
+                                                                fc: fc,
+                                                                hsn_sac_code: item.hsn,
+                                                                gst_rate: item.gst,
+                                                                declared_value_per_unit: item.cost,
+                                                                weightPerPiece: item.weight,
+                                                                group_name: item.group_name,
+                                                                category: item.category,
+                                                                fnsku: item.fnsku || '',
+                                                                mrp: item.mrp || 0,
+                                                                title: item.title || ''
+                                                            });
+                                                        }
+                                                    });
                                                 }
                                             } else {
                                                 let qty = 0;
@@ -1657,7 +1662,7 @@ const Calculation = () => {
                                                     manifestSkus.push({
                                                         sku: item.sku,
                                                         quantity: qty,
-                                                        fc: item.ixd_ixd_ixd_ixd_fulfilment_id,
+                                                        fc: ixdName,
                                                         hsn_sac_code: item.hsn,
                                                         gst_rate: item.gst,
                                                         declared_value_per_unit: item.cost,
@@ -1792,6 +1797,29 @@ const Calculation = () => {
                                 <span className="text-[11px] font-bold text-[#1C2340]/60 uppercase tracking-wider">AFS Days</span>
                                 <span className="text-sm font-bold text-[#1C2340] px-0.5">{masterData.afs_days || 0}</span>
                             </div>
+
+                            {/* Hand / Text Mode Toggle */}
+                            <div className="w-px h-5 bg-[#D9DDE5]"></div>
+
+                            <div className="flex items-center p-0.5 bg-[#F0F2F5] rounded-lg border border-[#D9DDE5]/50 overflow-hidden shadow-sm">
+                                <button
+                                    onClick={() => setIsHandMode(false)}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 ${!isHandMode ? 'bg-white text-[#5A5DF6] shadow-sm ring-1 ring-black/5' : 'text-[#1C2340]/60 hover:text-[#1C2340] hover:bg-black/5'}`}
+                                    title="Text Mode (Select and Copy)"
+                                >
+                                    <MousePointer2 size={13} className={!isHandMode ? "text-[#5A5DF6]" : "text-[#1C2340]/50"} />
+                                    <span>Text</span>
+                                </button>
+                                <button
+                                    onClick={() => setIsHandMode(true)}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 ${isHandMode ? 'bg-white text-[#5A5DF6] shadow-sm ring-1 ring-black/5' : 'text-[#1C2340]/60 hover:text-[#1C2340] hover:bg-black/5'}`}
+                                    title="Hand Mode (Drag to Scroll)"
+                                >
+                                    <Hand size={13} className={isHandMode ? "text-[#5A5DF6]" : "text-[#1C2340]/50"} />
+                                    <span>Scroll</span>
+                                </button>
+                            </div>
+
                         </div>
 
                         <div className="flex items-center gap-4">
@@ -1813,13 +1841,13 @@ const Calculation = () => {
                     </div>
 
                     {/* 🔥 COMPLETE EXCEL-STYLE TABLE WITH FILTER & ACTIONS 🔥 */}
-                    <div 
+                    <div
                         ref={tableContainerRef}
-                        onMouseDown={handleMouseDownTable}
-                        onMouseLeave={handleMouseLeaveTable}
-                        onMouseUp={handleMouseUpTable}
-                        onMouseMove={handleMouseMoveTable}
-                        className={`w-full overflow-x-auto overflow-y-auto custom-scrollbar bg-white ${isDraggingTable ? 'cursor-grabbing select-none' : 'cursor-grab'}`} 
+                        onMouseDown={isHandMode ? handleMouseDownTable : undefined}
+                        onMouseLeave={isHandMode ? handleMouseLeaveTable : undefined}
+                        onMouseUp={isHandMode ? handleMouseUpTable : undefined}
+                        onMouseMove={isHandMode ? handleMouseMoveTable : undefined}
+                        className={`w-full overflow-x-auto overflow-y-auto custom-scrollbar bg-white ${isHandMode ? (isDraggingTable ? 'cursor-grabbing select-none' : 'cursor-grab') : 'cursor-auto'}`}
                         style={{ height: 'calc(100vh - 180px)' }}
                     >
                         {filteredData.length === 0 ? (
@@ -2031,6 +2059,46 @@ const Calculation = () => {
                                         }
                                         const liveTotalWeight = row.final_wh !== "" ? (Number(row.final_wh) || 0) * (Number(row.weight) || 0) : "";
 
+                                        let renderTraQty = row.tra_qty;
+                                        let renderDih = row.quantity;
+                                        let renderAvailableQty = row.available_qty;
+                                        let renderSaleWhAvg = row.sale_wh_avg;
+                                        let renderSaleWh = row.sale_wh;
+                                        let renderShipWh = liveShipWh;
+                                        let renderFinalWh = row.final_wh;
+                                        let renderSuggestFinalWh = row.suggest_final_wh;
+                                        let renderStockAlloc = row.stock_alloc;
+                                        if (shipmentMode === 'FC' && row.fc_breakdown) {
+                                            let sumTra = 0, sumDih = 0, sumAvailable = 0, sumSaleAvg = 0, sumSaleWh = 0, sumShipWh = 0, sumFinalWh = 0, sumSuggestFinal = 0, sumAllocated = 0;
+                                            Object.values(row.fc_breakdown).forEach(fc => {
+                                                sumTra += Number(fc.tra_qty) || 0;
+                                                sumDih += Number(fc.quantity) || 0;
+                                                sumAvailable += Number(fc.available_qty) || 0;
+                                                sumSaleAvg += Number(fc.sale_wh_avg) || 0;
+                                                sumSaleWh += Number(fc.sale_wh) || 0;
+                                                sumShipWh += Number(fc.ship_wh) || 0;
+                                                const rawFinalWh = fc.final_wh === "" || fc.final_wh === undefined ? fc.suggest_final_wh : fc.final_wh;
+                                                sumFinalWh += Number(rawFinalWh) || 0;
+                                                sumSuggestFinal += Number(fc.suggest_final_wh) || 0;
+                                                if (fc.stock_alloc && typeof fc.stock_alloc === 'string' && fc.stock_alloc.includes(' / ')) {
+                                                    sumAllocated += Number(fc.stock_alloc.split(' / ')[1]) || 0;
+                                                }
+                                            });
+                                            renderTraQty = sumTra || 0;
+                                            renderDih = sumDih || 0;
+                                            renderAvailableQty = sumAvailable || 0;
+                                            renderSaleWhAvg = sumSaleAvg ? sumSaleAvg.toFixed(2) : 0;
+                                            renderSaleWh = sumSaleWh || 0;
+                                            renderShipWh = sumShipWh || 0;
+                                            renderFinalWh = sumFinalWh || 0;
+                                            renderSuggestFinalWh = sumSuggestFinal || 0;
+
+                                            if (row.stock_alloc && typeof row.stock_alloc === 'string' && row.stock_alloc.includes(' / ')) {
+                                                const masterAvailable = row.stock_alloc.split(' / ')[0];
+                                                renderStockAlloc = `${masterAvailable} / ${sumAllocated}`;
+                                            }
+                                        }
+
                                         return (
                                             <React.Fragment key={row.id}>
                                                 <tr className={`group hover:bg-[#F4F5F7]/80 hover:z-10 relative transition-colors text-[#1C2340]/80 ${typeof activeText !== 'undefined' ? activeText : 'text-xs'} ${expandedRows[row.id] ? 'bg-blue-50/20' : ''}`}>
@@ -2149,16 +2217,16 @@ const Calculation = () => {
                                                         <>
                                                             {visibleColumns.ref_sku && <td style={{ width: colWidthsRef.current.ref_sku, minWidth: colWidthsRef.current.ref_sku }} className="px-4 py-3 border-l border-[#D9DDE5]/30 font-medium truncate">{row.ref_sku}</td>}
                                                             {visibleColumns.ref_title && <td onDoubleClick={() => handleDoubleClick(row.id, 'ref_title')} style={{ width: colWidthsRef.current.ref_title, minWidth: colWidthsRef.current.ref_title, maxWidth: colWidthsRef.current.ref_title }} className={`px-4 py-3 font-medium cursor-pointer transition-all duration-300 ${expandedCell?.rowId === row.id && expandedCell?.colName === 'ref_title' ? 'whitespace-normal break-words bg-white shadow-sm' : 'truncate'}`} title="Double click to expand">{row.ref_title}</td>}
-                                                            {visibleColumns.tra_qty && <td style={{ width: colWidthsRef.current.tra_qty, minWidth: colWidthsRef.current.tra_qty }} className="px-4 py-3 text-center font-semibold text-[#5A5DF6]">{row.tra_qty}</td>}
-                                                            {visibleColumns.quantity && <td style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center">{row.quantity}</td>}
-                                                            {visibleColumns.available_qty && <td style={{ width: colWidthsRef.current.available_qty, minWidth: colWidthsRef.current.available_qty }} className="px-4 py-3 text-center font-bold text-[#1C2340] bg-[#F4F5F7]/50">{row.available_qty}</td>}
+                                                            {visibleColumns.tra_qty && <td style={{ width: colWidthsRef.current.tra_qty, minWidth: colWidthsRef.current.tra_qty }} className="px-4 py-3 text-center font-semibold text-[#5A5DF6]">{renderTraQty}</td>}
+                                                            {visibleColumns.quantity && <td style={{ width: colWidthsRef.current.quantity, minWidth: colWidthsRef.current.quantity }} className="px-4 py-3 text-center">{renderDih}</td>}
+                                                            {visibleColumns.available_qty && <td style={{ width: colWidthsRef.current.available_qty, minWidth: colWidthsRef.current.available_qty }} className="px-4 py-3 text-center font-bold text-[#1C2340] bg-[#F4F5F7]/50">{renderAvailableQty}</td>}
                                                             {visibleColumns.fc_id && shipmentMode === 'FC' && <td style={{ width: colWidthsRef.current.fc_id, minWidth: colWidthsRef.current.fc_id }} className="px-4 py-3 text-center font-bold text-gray-400 bg-[#F4F5F7]/20">-</td>}
                                                             {visibleColumns.fc_id && shipmentMode === 'IXD' && <td style={{ width: colWidthsRef.current.fc_id, minWidth: colWidthsRef.current.fc_id }} className="px-4 py-3 text-center font-bold text-[#5A5DF6] bg-blue-50/20">{ixdName}</td>}
 
                                                             {/* {visibleColumns.sale_total && <td style={{ width: colWidthsRef.current.sale_total, minWidth: colWidthsRef.current.sale_total }} className="px-4 py-3 text-center">{row.sale_total}</td>} */}
-                                                            {visibleColumns.sale_wh_avg && <td style={{ width: colWidthsRef.current.sale_wh_avg, minWidth: colWidthsRef.current.sale_wh_avg }} className="px-4 py-3 text-center font-medium text-[#1C2340] bg-orange-50/20">{row.sale_wh_avg}</td>}
-                                                            {visibleColumns.sale_wh && <td style={{ width: colWidthsRef.current.sale_wh, minWidth: colWidthsRef.current.sale_wh }} className="px-4 py-3 text-center">{row.sale_wh}</td>}
-                                                            {visibleColumns.ship_wh && <td style={{ width: colWidthsRef.current.ship_wh, minWidth: colWidthsRef.current.ship_wh }} className="px-4 py-3 text-center">{liveShipWh}</td>}
+                                                            {visibleColumns.sale_wh_avg && <td style={{ width: colWidthsRef.current.sale_wh_avg, minWidth: colWidthsRef.current.sale_wh_avg }} className="px-4 py-3 text-center font-medium text-[#1C2340] bg-orange-50/20">{renderSaleWhAvg}</td>}
+                                                            {visibleColumns.sale_wh && <td style={{ width: colWidthsRef.current.sale_wh, minWidth: colWidthsRef.current.sale_wh }} className="px-4 py-3 text-center">{renderSaleWh}</td>}
+                                                            {visibleColumns.ship_wh && <td style={{ width: colWidthsRef.current.ship_wh, minWidth: colWidthsRef.current.ship_wh }} className="px-4 py-3 text-center">{renderShipWh}</td>}
                                                             {visibleColumns.sum_val && <td style={{ width: colWidthsRef.current.sum_val, minWidth: colWidthsRef.current.sum_val }} className="px-4 py-3 text-center">{row.sum_val}</td>}
                                                             {visibleColumns.stock_alloc && (
                                                                 <td
@@ -2166,8 +2234,8 @@ const Calculation = () => {
                                                                     className="px-4 py-3 text-center font-bold"
                                                                     title={row.stock_alloc_ratio === null ? 'No Stock info' : `Fulfillment Ratio: ${Math.round(row.stock_alloc_ratio * 100)}%`}
                                                                 >
-                                                                    {row.stock_alloc ? (
-                                                                        row.stock_alloc.includes(' / ') ? (
+                                                                    {renderStockAlloc ? (
+                                                                        renderStockAlloc.includes(' / ') ? (
                                                                             <span>
                                                                                 <span className="text-[#1C2340]">{row.stock_alloc.split(' / ')[0]}</span>
                                                                                 <span className="text-[#1C2340]/60 mx-1">/</span>
@@ -2175,10 +2243,10 @@ const Calculation = () => {
                                                                                     row.stock_alloc_ratio === null ? 'text-[#1C2340]' :
                                                                                         row.stock_alloc_ratio >= 1 ? 'text-[#22B573]' :
                                                                                             'text-[#E74C3C]'
-                                                                                }>{row.stock_alloc.split(' / ')[1]}</span>
+                                                                                }>{renderStockAlloc.split(' / ')[1]}</span>
                                                                             </span>
                                                                         ) : (
-                                                                            <span className="text-[#1C2340]">{row.stock_alloc}</span>
+                                                                            <span className="text-[#1C2340]">{renderStockAlloc}</span>
                                                                         )
                                                                     ) : <span className="text-[#1C2340]">-</span>}
                                                                 </td>
@@ -2202,8 +2270,8 @@ const Calculation = () => {
                                                                     </div>
                                                                 )}
                                                                 <div className="flex items-center justify-center">
-                                                                    <input type="number" value={row.final_wh === "" ? "" : row.final_wh} onChange={(e) => { const val = e.target.value; setCalculationData(prev => prev.map(p => p.id === row.id ? { ...p, final_wh: val, is_manual_final_wh: 1 } : p)); handleItemAutoSave(row.id, val); handleStockWarning(row.id, val, 'final_wh'); }} onWheel={handleWheelBlur} className="w-14 text-center font-bold bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none transition-colors" style={{ color: row.is_manual_final_wh ? '#5A5DF6' : '#1C2340' }} />
-                                                                    {row.stock_alloc && row.stock_alloc.includes(' / ') && (
+                                                                    <input type="number" value={renderFinalWh === "" ? "" : renderFinalWh} onChange={(e) => { const val = e.target.value; setCalculationData(prev => prev.map(p => p.id === row.id ? { ...p, final_wh: val, is_manual_final_wh: 1 } : p)); handleItemAutoSave(row.id, val); handleStockWarning(row.id, val, 'final_wh'); }} onWheel={handleWheelBlur} className="w-14 text-center font-bold bg-transparent border-b border-transparent hover:border-[#D9DDE5] focus:border-[#5A5DF6] outline-none transition-colors" style={{ color: row.is_manual_final_wh ? '#5A5DF6' : '#1C2340' }} />
+                                                                    {renderStockAlloc && renderStockAlloc.includes(' / ') && (
                                                                         <>
                                                                             <span className="text-[#1C2340]/60 mx-1">/</span>
                                                                             <span className={
@@ -2211,7 +2279,7 @@ const Calculation = () => {
                                                                                     row.stock_alloc_ratio >= 1 ? 'text-[#22B573]' :
                                                                                         'text-[#E74C3C]'
                                                                             }>
-                                                                                {row.stock_alloc.split(' / ')[1]}
+                                                                                {renderStockAlloc.split(' / ')[1]}
                                                                             </span>
                                                                         </>
                                                                     )}
@@ -2246,7 +2314,7 @@ const Calculation = () => {
                                                                         <input
                                                                             type="number"
                                                                             autoFocus
-                                                                            value={row.suggest_final_wh === "" ? "" : row.suggest_final_wh}
+                                                                            value={renderSuggestFinalWh === "" ? "" : renderSuggestFinalWh}
                                                                             onChange={(e) => {
                                                                                 const val = e.target.value;
                                                                                 setCalculationData(prev => prev.map(p => p.id === row.id ? { ...p, suggest_final_wh: val, is_manual_suggest_final_wh: 1 } : p));
@@ -2270,9 +2338,9 @@ const Calculation = () => {
                                                                             title={row.is_manual_suggest_final_wh ? "Manually edited. Double-click to edit again." : "Double-click to edit manually."}
                                                                         >
                                                                             <span className={`cursor-pointer text-[#1C2340] ${row.is_manual_suggest_final_wh ? 'underline decoration-dashed underline-offset-4' : ''}`}>
-                                                                                {row.suggest_final_wh}
+                                                                                {renderSuggestFinalWh}
                                                                             </span>
-                                                                            {row.stock_alloc && row.stock_alloc.includes(' / ') && (
+                                                                            {renderStockAlloc && renderStockAlloc.includes(' / ') && (
                                                                                 <>
                                                                                     <span className="text-[#1C2340]/60 mx-1">/</span>
                                                                                     <span className={
@@ -2280,7 +2348,7 @@ const Calculation = () => {
                                                                                             row.stock_alloc_ratio >= 1 ? 'text-[#22B573]' :
                                                                                                 'text-[#E74C3C]'
                                                                                     }>
-                                                                                        {row.stock_alloc.split(' / ')[1]}
+                                                                                        {renderStockAlloc.split(' / ')[1]}
                                                                                     </span>
                                                                                 </>
                                                                             )}
@@ -2685,65 +2753,65 @@ const Calculation = () => {
                                         <div className="grid grid-cols-2 gap-6">
                                             <div>
                                                 <label className="text-xs text-gray-600">Group Name *</label>
-                                                <input type="text" name="groupName" value={editFormData.groupName || ''} required onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="text" name="groupName" value={editFormData.groupName || ''} required onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${!editFormData.groupName ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                             <div>
                                                 <label className="text-xs text-gray-600">SKU *</label>
-                                                <input type="text" name="sku" value={editFormData.sku || ''} required onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="text" name="sku" value={editFormData.sku || ''} required onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${!editFormData.sku ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                         </div>
 
                                         <div>
                                             <label className="text-xs text-gray-600">Title</label>
-                                            <textarea name="title" rows="2" value={editFormData.title || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                            <textarea name="title" rows="2" value={editFormData.title || ''} onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${!editFormData.title ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                         </div>
 
                                         <div className="grid grid-cols-3 gap-6">
                                             <div>
                                                 <label className="text-xs text-gray-600">Category</label>
-                                                <input type="text" name="category" value={editFormData.category || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="text" name="category" value={editFormData.category || ''} onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${!editFormData.category ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                             <div>
                                                 <label className="text-xs text-gray-600">HSN</label>
-                                                <input type="text" name="hsn" value={editFormData.hsn || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="text" name="hsn" value={editFormData.hsn || ''} onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${!editFormData.hsn ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                             <div>
                                                 <label className="text-xs text-gray-600">GST</label>
-                                                <input type="text" name="gst" value={editFormData.gst || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="text" name="gst" value={editFormData.gst || ''} onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${!editFormData.gst ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                         </div>
 
                                         <div className="grid grid-cols-3 gap-6">
                                             <div>
                                                 <label className="text-xs text-gray-600">Cost (₹)</label>
-                                                <input type="number" step="0.01" name="cost" value={editFormData.cost ?? ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="number" step="0.01" name="cost" value={editFormData.cost ?? ''} onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${(editFormData.cost === null || editFormData.cost === undefined || editFormData.cost === '' || Number(editFormData.cost) === 0) ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                             <div>
                                                 <label className="text-xs text-gray-600">Weight (kg/g)</label>
-                                                <input type="number" step="0.01" name="weight" value={editFormData.weight ?? ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="number" step="0.01" name="weight" value={editFormData.weight ?? ''} onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${(editFormData.weight === null || editFormData.weight === undefined || editFormData.weight === '' || Number(editFormData.weight) === 0) ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                             <div>
                                                 <label className="text-xs text-gray-600">MRP (₹)</label>
-                                                <input type="number" step="0.01" name="mrp" value={editFormData.mrp ?? ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="number" step="0.01" name="mrp" value={editFormData.mrp ?? ''} onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${(editFormData.mrp === null || editFormData.mrp === undefined || editFormData.mrp === '' || Number(editFormData.mrp) === 0) ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                         </div>
 
                                         <div className="grid grid-cols-5 gap-6 mt-6">
                                             <div>
                                                 <label className="text-xs text-gray-600">FNSKU</label>
-                                                <input type="text" name="fnsku" value={editFormData.fnsku || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="text" name="fnsku" value={editFormData.fnsku || ''} onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${!editFormData.fnsku ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                             <div>
                                                 <label className="text-xs text-gray-600">Length (L)</label>
-                                                <input type="number" step="0.01" name="packing_dimension_length" value={editFormData.packing_dimension_length || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="number" step="0.01" name="packing_dimension_length" value={editFormData.packing_dimension_length ?? ''} onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${(editFormData.packing_dimension_length === null || editFormData.packing_dimension_length === undefined || editFormData.packing_dimension_length === '' || Number(editFormData.packing_dimension_length) === 0) ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                             <div>
                                                 <label className="text-xs text-gray-600">Width (W)</label>
-                                                <input type="number" step="0.01" name="packing_dimension_width" value={editFormData.packing_dimension_width || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="number" step="0.01" name="packing_dimension_width" value={editFormData.packing_dimension_width ?? ''} onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${(editFormData.packing_dimension_width === null || editFormData.packing_dimension_width === undefined || editFormData.packing_dimension_width === '' || Number(editFormData.packing_dimension_width) === 0) ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                             <div>
                                                 <label className="text-xs text-gray-600">Height (H)</label>
-                                                <input type="number" step="0.01" name="packing_dimension_height" value={editFormData.packing_dimension_height || ''} onChange={handleEditInputChange} className="w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6]" />
+                                                <input type="number" step="0.01" name="packing_dimension_height" value={editFormData.packing_dimension_height ?? ''} onChange={handleEditInputChange} className={`w-full border rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-[#5A5DF6] ${(editFormData.packing_dimension_height === null || editFormData.packing_dimension_height === undefined || editFormData.packing_dimension_height === '' || Number(editFormData.packing_dimension_height) === 0) ? 'border-red-500 bg-red-50' : 'border-[#EAEBF3]'}`} />
                                             </div>
                                             <div>
                                                 <label className="text-xs text-gray-600">Unit</label>

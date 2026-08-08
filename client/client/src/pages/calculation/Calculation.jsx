@@ -139,6 +139,7 @@ const Calculation = () => {
     };
     const shipmentMode = localStorage.getItem('shipment_mode') || 'IXD';
     const [ixdName, setIxdName] = useState("");
+    console.log(ixdName)
 
     // Double click cell expand karne ke liye
     const [expandedCell, setExpandedCell] = useState({ rowId: null, colName: null });
@@ -859,7 +860,7 @@ const Calculation = () => {
 
             let shipWh = 0;
             let suggestedShipWh = 0;
-            
+
             if (item.fc_breakdown && typeof item.fc_breakdown === 'object' && Object.keys(item.fc_breakdown).length > 0) {
                 let fcShipWhSum = 0;
                 let fcSuggestedShipWhSum = 0;
@@ -1622,31 +1623,31 @@ const Calculation = () => {
                                                     if (typeof parsedFcBreakdown === 'string') {
                                                         parsedFcBreakdown = JSON.parse(parsedFcBreakdown); // double parse in case of double stringified
                                                     }
-                                                } catch(e) {
+                                                } catch (e) {
                                                     console.error("Parse error for sku:", item.sku, e);
                                                 }
                                                 console.log("manifest sku:", item.sku, "fc_breakdown orig:", item.fc_breakdown, "parsed:", parsedFcBreakdown);
-                                                
+
                                                 if (parsedFcBreakdown && typeof parsedFcBreakdown === 'object') {
                                                     Object.entries(parsedFcBreakdown).forEach(([fc, data]) => {
                                                         const finalWh = data.final_wh !== undefined && data.final_wh !== "" ? Number(data.final_wh) : Number(data.suggest_final_wh || 0);
                                                         if (finalWh > 0) {
-                                                        manifestSkus.push({
-                                                            sku: item.sku,
-                                                            quantity: finalWh,
-                                                            fc: fc,
-                                                            hsn_sac_code: item.hsn,
-                                                            gst_rate: item.gst,
-                                                            declared_value_per_unit: item.cost,
-                                                            weightPerPiece: item.weight,
-                                                            group_name: item.group_name,
-                                                            category: item.category,
-                                                            fnsku: item.fnsku || '',
-                                                            mrp: item.mrp || 0,
-                                                            title: item.title || ''
-                                                        });
-                                                    }
-                                                });
+                                                            manifestSkus.push({
+                                                                sku: item.sku,
+                                                                quantity: finalWh,
+                                                                fc: fc,
+                                                                hsn_sac_code: item.hsn,
+                                                                gst_rate: item.gst,
+                                                                declared_value_per_unit: item.cost,
+                                                                weightPerPiece: item.weight,
+                                                                group_name: item.group_name,
+                                                                category: item.category,
+                                                                fnsku: item.fnsku || '',
+                                                                mrp: item.mrp || 0,
+                                                                title: item.title || ''
+                                                            });
+                                                        }
+                                                    });
                                                 }
                                             } else {
                                                 let qty = 0;
@@ -1657,7 +1658,7 @@ const Calculation = () => {
                                                     manifestSkus.push({
                                                         sku: item.sku,
                                                         quantity: qty,
-                                                        fc: item.ixd_ixd_ixd_ixd_fulfilment_id,
+                                                        fc: ixdName,
                                                         hsn_sac_code: item.hsn,
                                                         gst_rate: item.gst,
                                                         declared_value_per_unit: item.cost,
@@ -1813,13 +1814,13 @@ const Calculation = () => {
                     </div>
 
                     {/* 🔥 COMPLETE EXCEL-STYLE TABLE WITH FILTER & ACTIONS 🔥 */}
-                    <div 
+                    <div
                         ref={tableContainerRef}
                         onMouseDown={handleMouseDownTable}
                         onMouseLeave={handleMouseLeaveTable}
                         onMouseUp={handleMouseUpTable}
                         onMouseMove={handleMouseMoveTable}
-                        className={`w-full overflow-x-auto overflow-y-auto custom-scrollbar bg-white ${isDraggingTable ? 'cursor-grabbing select-none' : 'cursor-grab'}`} 
+                        className={`w-full overflow-x-auto overflow-y-auto custom-scrollbar bg-white ${isDraggingTable ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
                         style={{ height: 'calc(100vh - 180px)' }}
                     >
                         {filteredData.length === 0 ? (

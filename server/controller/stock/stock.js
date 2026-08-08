@@ -110,11 +110,14 @@ const uploadStockReport = async (req, res) => {
                     owner: owner,
                     req_stock: 0,
                     avg_qty: 0,
+                    original_available_qty: 0,
+                    incoming_production_stock: 0,
                     available_qty: 0
                 };
             }
             groupedData[groupName].req_stock += reqStock;
             groupedData[groupName].avg_qty += avgQty;
+            groupedData[groupName].original_available_qty += balance;
             groupedData[groupName].available_qty += balance;
             // Category/Owner khali ho to naye se bhar do
             if (!groupedData[groupName].category && category) groupedData[groupName].category = category;
@@ -126,19 +129,22 @@ const uploadStockReport = async (req, res) => {
 
         // 🔥 CHANGE 1: array me sabse pehle `reportId` add kiya (yehi aapka upload_id hai)
         const bulkValues = Object.values(groupedData).map((row) => [
-            reportId, 
-            row.group_name, 
-            row.category, 
-            row.owner, 
-            row.req_stock, 
-            row.avg_qty, 
+            reportId,
+            row.group_name,
+            row.category,
+            row.owner,
+            row.req_stock,
+            row.avg_qty,
+            row.original_available_qty,
+            row.incoming_production_stock,
             row.available_qty
         ]);
 
         if (bulkValues.length > 0) {
             // 🔥 CHANGE 2: Query me `upload_id` column ko add kiya
             await connection.query(
-                `INSERT INTO stock_availability (upload_id, group_name, category, owner, req_stock, avg_qty, available_qty) VALUES ?`,
+                `INSERT INTO stock_availability (upload_id, group_name, category, owner, req_stock, avg_qty, original_available_qty, incoming_production_stock, available_qty) VALUES ?`,
+
                 [bulkValues]
             );
         }
@@ -173,7 +179,8 @@ const getStockAvailability = async (req, res) => {
     try {
         connection = await db.getConnection();
         const [rows] = await connection.query(
-            `SELECT group_name, category, owner, req_stock, avg_qty, available_qty FROM stock_availability`
+            `SELECT group_name, category, owner, req_stock, avg_qty, original_available_qty, incoming_production_stock, available_qty FROM stock_availability`
+
         );
         connection.release();
         return successResponse(res, "Stock availability fetched successfully", rows, 200);
@@ -184,7 +191,36 @@ const getStockAvailability = async (req, res) => {
     }
 };
 
+// =======================================================
+// 3. UPDATE INCOMING STOCK
+// =======================================================
+const updateIncomingStock = async (req, res) => {
+    let connection;
+    try {
+        const { group_name, incoming_qty } = req.body;
+        if (!group_name) return errorResponse(res, "Group name is required", 400);
+        const newIncoming = parseInt(incoming_qty) || 0;
+        connection = await db.getConnection();
+        await connection.query(
+            `UPDATE stock_availability 
+             SET incoming_production_stock = ?, 
+                 available_qty = original_available_qty + ? 
+             WHERE group_name = ?`,
+            [newIncoming, newIncoming, group_name]
+        );
+        connection.release();
+        return successResponse(res, "Incoming stock updated successfully", null, 200);
+    } catch (error) {
+        console.error("Update Incoming Stock Error:", error);
+        if (connection) connection.release();
+        return errorResponse(res, "Failed to update incoming stock", 500);
+    }
+};
+
+
 module.exports = {
     uploadStockReport,
-    getStockAvailability
+    getStockAvailability,
+    updateIncomingStock
+
 };

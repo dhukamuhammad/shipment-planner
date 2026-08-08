@@ -10,6 +10,7 @@ const Stock = () => {
     });
     console.log("masterData", masterData)
     const [availableStock, setAvailableStock] = useState({});
+    const [incomingStock, setIncomingStock] = useState({});
     const [isLoading, setIsLoading] = useState(true);
 
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -42,10 +43,13 @@ const Stock = () => {
             const response = await api.get("/getStockAvailability", { params: { _t: Date.now() } });
             if (response.data && response.data.data) {
                 const map = {};
+                const incomingMap = {};
                 response.data.data.forEach((row) => {
                     map[row.group_name] = Number(row.available_qty) || 0;
+                    incomingMap[row.group_name] = Number(row.incoming_production_stock) || 0;
                 });
                 setAvailableStock(map);
+                setIncomingStock(incomingMap);
             }
         } catch (error) {
             console.error("Error fetching available stock:", error);
@@ -156,15 +160,20 @@ const Stock = () => {
             groups[groupName] += effectiveQty;
         });
 
-        const result = Object.entries(groups).map(([groupName, totalFinalWh]) => ({
-            group_name: groupName,
-            final_wh: totalFinalWh,
-            available_qty: availableStock[groupName] !== undefined ? availableStock[groupName] : 0,
-            category: groupCategories[groupName] || '-'
-        }));
+        const result = Object.entries(groups).map(([groupName, totalFinalWh]) => {
+            // const baseAvailable = availableStock[groupName] !== undefined ? availableStock[groupName] : 0;
+            // const incoming = incomingStock[groupName] || 0;
+            return {
+                group_name: groupName,
+                final_wh: totalFinalWh,
+                // available_qty: baseAvailable + incoming,
+                available_qty: availableStock[groupName] !== undefined ? availableStock[groupName] : 0,
+                category: groupCategories[groupName] || '-'
+            };
+        });
 
         return result.map((row) => ({ ...row, different: row.available_qty - row.final_wh }));
-    }, [displayData, availableStock]);
+    }, [displayData, availableStock,]);
 
     // Hamesha "Different" ke hisab se sorted rahega — default me minus sabse upar, click karne par direction reverse ho jayegi
     const sortedStock = useMemo(() => {
@@ -184,7 +193,7 @@ const Stock = () => {
         );
     }, [sortedStock, searchTerm]);
 
-    
+
 
     return (
         <div className="h-[calc(100vh-32px)] flex flex-col space-y-3 overflow-hidden">
@@ -237,6 +246,7 @@ const Stock = () => {
                                     <th className="px-4 py-3 text-center font-bold text-[#1C2340]/70 uppercase tracking-wider">Category</th>
                                     <th className="px-4 py-3 text-center font-bold text-[#1C2340]/70 uppercase tracking-wider">Required Stock</th>
                                     <th className="px-4 py-3 text-center font-bold text-[#1C2340]/70 uppercase tracking-wider">Available Stock</th>
+                                    <th className="px-4 py-3 text-center font-bold text-[#1C2340]/70 uppercase tracking-wider">Incoming Production Stock</th>
                                     <th
                                         onClick={() => setSortByDifferent(prev => !prev)}
                                         className="px-4 py-3 text-center font-bold text-[#1C2340]/70 uppercase tracking-wider cursor-pointer select-none hover:text-[#5A5DF6] transition-colors"
@@ -255,6 +265,31 @@ const Stock = () => {
                                         <td className="px-4 py-3 text-center text-[#1C2340]/70">{row.category}</td>
                                         <td className="px-4 py-3 text-center font-bold text-[#5A5DF6]">{row.final_wh}</td>
                                         <td className="px-4 py-3 text-center font-bold text-[#1C2340]">{row.available_qty}</td>
+                                        <td className="px-4 py-3 text-center">
+                                            <input
+                                                type="number"
+                                                value={incomingStock[row.group_name] !== undefined ? incomingStock[row.group_name] : ''}
+                                                onChange={(e) => {
+                                                    const val = e.target.value === '' ? '' : parseInt(e.target.value);
+                                                    setIncomingStock(prev => ({ ...prev, [row.group_name]: val }));
+                                                }}
+                                                onBlur={async () => {
+                                                    const newIncoming = incomingStock[row.group_name] || 0;
+                                                    try {
+                                                        await api.post("/update-incoming-stock", {
+                                                            group_name: row.group_name,
+                                                            incoming_qty: newIncoming
+                                                        });
+                                                        fetchAvailableStock();
+                                                    } catch (error) {
+                                                        console.error("Failed to update incoming stock", error);
+                                                        alert("Failed to save incoming stock");
+                                                    }
+                                                }}
+                                                className="w-20 px-2 py-1 text-center text-[11px] border border-[#D9DDE5] rounded-[4px] focus:outline-none focus:border-[#5A5DF6] bg-white text-[#1C2340] font-semibold"
+                                                placeholder="0"
+                                            />
+                                        </td>
                                         <td className="px-4 py-3 text-center flex items-center justify-center gap-1">
                                             {row.different < 0 ? <TrendingDown size={12} className="text-[#E74C3C]" /> : <TrendingUp size={12} className="text-[#22B573]" />}
                                             <span className={row.different < 0 ? "text-[#E74C3C] font-semibold" : "text-[#22B573] font-semibold"}>{row.different}</span>

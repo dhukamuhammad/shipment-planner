@@ -555,11 +555,38 @@ const getCalculationData = async (req, res) => {
                             ?, report_id, group_name, sku, title, category,
                             int_wh, dec_wh, non_apron_qty, apr_sky_blue, apr_dark_blue, apr_brown, apr_green, apr_tan, apr_black, apr_red, apr_grey,
                             weight, total_weight, hsn, gst, cost, ref_sku, ref_title, tra_qty, quantity, available_qty, stock_alloc,
-                            ixd_fulfilment_id, warehouse_fulfilment_id, sale_total, sale_wh, sale_wh_avg, ship_wh, sum_val, final_wh,
-                            is_manual_final_wh, marketplace_id, suggest_final_wh, is_manual_suggest_final_wh, shipment_packaging,
+                            ixd_fulfilment_id, warehouse_fulfilment_id, sale_total, sale_wh, sale_wh_avg, ship_wh, sum_val, '',
+                            0, marketplace_id, '', 0, shipment_packaging,
                             mrp, fnsku, packing_dimension_length, packing_dimension_width, packing_dimension_height, packing_dimension_unit, fc, fc_breakdown
                         FROM shipment_calculation_items WHERE plan_id = ?
                     `, [insertResult.insertId, clonedPlan.id]);
+
+                                        // Clean up cloned fc_breakdown manual overrides
+                    const [clonedItems] = await connection.query(`SELECT id, fc_breakdown FROM shipment_calculation_items WHERE plan_id = ? AND fc_breakdown IS NOT NULL AND fc_breakdown != ''`, [insertResult.insertId]);
+                    for (const item of clonedItems) {
+                        try {
+                            const fcData = typeof item.fc_breakdown === 'string' ? JSON.parse(item.fc_breakdown) : item.fc_breakdown;
+                            let changed = false;
+                            for (const fcName in fcData) {
+                                if (fcData[fcName].is_manual_final_wh || fcData[fcName].final_wh !== "") {
+                                    fcData[fcName].final_wh = "";
+                                    fcData[fcName].is_manual_final_wh = 0;
+                                    changed = true;
+                                }
+                                if (fcData[fcName].is_manual_suggest_final_wh || fcData[fcName].suggest_final_wh !== "") {
+                                    fcData[fcName].suggest_final_wh = "";
+                                    fcData[fcName].is_manual_suggest_final_wh = 0;
+                                    changed = true;
+                                }
+                            }
+                            if (changed) {
+                                await connection.query(`UPDATE shipment_calculation_items SET fc_breakdown = ? WHERE id = ?`, [JSON.stringify(fcData), item.id]);
+                            }
+                        } catch (e) {
+                            console.error("Failed to clean up cloned fc_breakdown for item", item.id, e);
+                        }
+                    }
+
 
                     // Now update masterData to the new cloned plan so the rest of the flow uses it
                     const [newMasterRows] = await connection.query(`SELECT * FROM shipment_calculations_master WHERE id = ?`, [insertResult.insertId]);

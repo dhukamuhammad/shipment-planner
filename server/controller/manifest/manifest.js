@@ -66,14 +66,19 @@ const uploadTemplate = async (req, res) => {
             for (const old of oldRows) {
                 // Server se purani file delete karo
                 try {
-                    const oldPath = path.join(process.cwd(), '../client/public/upload', old.file_name);
+                    const isPackaged = process.mainModule && process.mainModule.filename.indexOf('app.asar') !== -1;
+                    let uploadDirectory = process.env.UPLOAD_DIR || path.join(__dirname, "../../uploads");
+                    if (isPackaged || process.versions.electron) {
+                        uploadDirectory = path.join(os.homedir(), "crasome-desktop-app-uploads");
+                    }
+                    const oldPath = path.join(uploadDirectory, old.file_name);
                     if (fs.existsSync(oldPath)) {
                         fs.unlinkSync(oldPath);
                     }
                 } catch (e) {
                     console.error("Failed to delete old template file", e);
                 }
-                
+
                 // DB se purani entry delete karo
                 await connection.query(`DELETE FROM uploaded_reports WHERE id = ?`, [old.id]);
             }
@@ -122,7 +127,12 @@ const downloadManifest = async (req, res) => {
         }
 
         const templateFilename = rows[0].file_name;
-        const templatePath = path.join(process.cwd(), '../client/public/upload', templateFilename);
+        const isPackaged = process.mainModule && process.mainModule.filename.indexOf('app.asar') !== -1;
+        let uploadDirectory = process.env.UPLOAD_DIR || path.join(__dirname, "../../uploads");
+        if (isPackaged || process.versions.electron) {
+            uploadDirectory = path.join(os.homedir(), "crasome-desktop-app-uploads");
+        }
+        const templatePath = path.join(uploadDirectory, templateFilename);
 
         if (!fs.existsSync(templatePath)) {
             return res.status(404).json({ message: `File missing on server. Path: ${templatePath}` });

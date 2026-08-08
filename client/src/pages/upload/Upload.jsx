@@ -28,6 +28,23 @@ const Upload = () => {
             const response = await api.get("/recent");
             if (response.data && response.data.data) {
                 setRecentReports(response.data.data);
+                const reports = response.data.data;
+                setRecentReports(reports);
+                setIsCreateNewOpen(true); // 🔥 Ye left side wale "Create Shipment" area ko wapas open kar dega
+
+                // 🔄 AUTO-RESTORE STATE: Agar pehle se files hain, toh button wapas dikhao aur marketplace select karo
+                if (reports.length > 0) {
+                    setShowGoToCalc(true);
+
+                    const firstReportWithMarketplace = reports.find(r => r.marketplace_id);
+                    if (firstReportWithMarketplace) {
+                        setSelectedMarketplaceId(firstReportWithMarketplace.marketplace_id.toString());
+                    }
+                } else {
+                    // Agar koi report nahi hai toh chupchap reset kar do
+                    setShowGoToCalc(false);
+                    setIsCreateNewOpen(false); // 🔥 Aur left area close kardo
+                }
             }
         } catch (error) {
             console.error("Error fetching recent uploads:", error);
@@ -38,6 +55,15 @@ const Upload = () => {
     useEffect(() => {
         fetchRecentUploads();
     }, []);
+
+    // 👀 WATCHER: Agar files list real-time me khaali ho jaye (e.g. Delete karne par)
+    useEffect(() => {
+        if (recentReports.length === 0) {
+            setShowGoToCalc(false);
+            setIsCreateNewOpen(false);
+            setSelectedMarketplaceId("");
+        }
+    }, [recentReports]);
 
     const handleFileSelect = (e) => {
         if (e.target.files && e.target.files.length > 0) {
@@ -231,7 +257,8 @@ const Upload = () => {
         const uploadedTypes = recentReports.map(r => r.report_type);
         const hasAFS = uploadedTypes.includes('AFS');
         const hasDIH = uploadedTypes.includes('DIH');
-        const hasStock = uploadedTypes.includes('Stock') || uploadedTypes.includes('Business');
+        const hasStock = uploadedTypes.includes('Stock') 
+        // || uploadedTypes.includes('Business');
 
         if (!hasAFS || !hasDIH || !hasStock) {
             const missing = [];
@@ -255,14 +282,14 @@ const Upload = () => {
                 </div>
                 <div className="flex items-center gap-3">
                     {showGoToCalc && (
-                        <button 
+                        <button
                             onClick={handleGoToCalc}
                             className="flex items-center gap-2 bg-white border border-[#D9DDE5] hover:bg-[#F4F5F7] text-[#1C2340] px-5 py-2.5 rounded-[5px] text-sm font-semibold transition-colors shadow-sm"
                         >
                             Go to Calculation
                         </button>
                     )}
-                    <button 
+                    <button
                         onClick={() => setIsCreateNewOpen(!isCreateNewOpen)}
                         className="flex items-center gap-2 bg-[#5A5DF6] hover:bg-[#494ce0] text-white px-5 py-2.5 rounded-[5px] text-sm font-semibold transition-colors shadow-sm"
                     >
@@ -285,73 +312,73 @@ const Upload = () => {
                             </div>
                         )}
                         <div className={isCreateNewOpen ? '' : 'opacity-30'}>
-                        {/* Marketplace Dropdown & Mode Toggle */}
-                        <div className="mb-4 flex flex-col gap-3">
-                            <MarketplaceDropdown 
-                                selectedId={selectedMarketplaceId} 
-                                onChange={setSelectedMarketplaceId} 
-                            />
-                        </div>
-
-                        {/* Drag & Drop Zone */}
-                        <div
-                            className={`border-2 border-dashed border-[#D9DDE5] rounded-[5px] bg-[#F4F5F7]/30 transition-colors p-6 flex flex-col items-center justify-center h-full ${!selectedMarketplaceId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#F4F5F7]/80 cursor-pointer'}`}
-                            onClick={() => {
-                                if (!selectedMarketplaceId) {
-                                    alert("Please select a marketplace first!");
-                                    return;
-                                }
-                                fileInputRef.current.click();
-                            }}
-                        >
-                            {/* Hidden file input */}
-                            <input
-                                type="file"
-                                className="hidden"
-                                ref={fileInputRef}
-                                onChange={handleFileSelect}
-                                accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-                                multiple
-                            />
-                            <div className="w-12 h-12 rounded-full bg-[#5A5DF6]/10 flex items-center justify-center mb-3">
-                                <UploadCloud size={24} className="text-[#5A5DF6]" />
+                            {/* Marketplace Dropdown & Mode Toggle */}
+                            <div className="mb-4 flex flex-col gap-3">
+                                <MarketplaceDropdown
+                                    selectedId={selectedMarketplaceId}
+                                    onChange={setSelectedMarketplaceId}
+                                />
                             </div>
-                            <h3 className="text-sm font-bold text-[#1C2340] mb-1">
-                                Upload Report
-                            </h3>
 
-                            {files.length > 0 ? (
-                                <div className="text-center mb-4">
-                                    <p className="text-[#5A5DF6] text-xs font-semibold max-w-[250px] truncate">{files.length} file(s) selected</p>
-                                    <p className="text-[11px] text-[#1C2340]/50 mt-0.5">Click to browse again</p>
-                                </div>
-                            ) : (
-                                <p className="text-xs text-[#1C2340]/50 text-center mb-4 max-w-xs">
-                                    Drag and drop your CSV or Excel file here, or click to browse.
-                                </p>
-                            )}
-
-                            <button
-                                className={`${isUploading ? 'bg-[#D9DDE5] text-[#1C2340]/50 cursor-not-allowed' : 'bg-[#5A5DF6] hover:bg-[#494ce0] text-white'} px-5 py-2 text-xs font-semibold rounded-[4px] transition-colors shadow-sm`}
-                                onClick={(e) => {
-                                    e.stopPropagation();
+                            {/* Drag & Drop Zone */}
+                            <div
+                                className={`border-2 border-dashed border-[#D9DDE5] rounded-[5px] bg-[#F4F5F7]/30 transition-colors p-6 flex flex-col items-center justify-center h-full ${!selectedMarketplaceId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#F4F5F7]/80 cursor-pointer'}`}
+                                onClick={() => {
                                     if (!selectedMarketplaceId) {
                                         alert("Please select a marketplace first!");
                                         return;
                                     }
-                                    if (files.length > 0) handleUploadClick();
-                                    else fileInputRef.current.click();
+                                    fileInputRef.current.click();
                                 }}
-                                disabled={isUploading}
                             >
-                                {isUploading ? "Uploading..." : files.length > 0 ? "Upload Now" : "Browse Files"}
-                            </button>
-                            <p className="text-[10px] text-[#1C2340]/40 mt-3">
-                                Supported formats: .csv, .xlsx, .xls (Max 10MB)
-                            </p>
+                                {/* Hidden file input */}
+                                <input
+                                    type="file"
+                                    className="hidden"
+                                    ref={fileInputRef}
+                                    onChange={handleFileSelect}
+                                    accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                                    multiple
+                                />
+                                <div className="w-12 h-12 rounded-full bg-[#5A5DF6]/10 flex items-center justify-center mb-3">
+                                    <UploadCloud size={24} className="text-[#5A5DF6]" />
+                                </div>
+                                <h3 className="text-sm font-bold text-[#1C2340] mb-1">
+                                    Upload Report
+                                </h3>
+
+                                {files.length > 0 ? (
+                                    <div className="text-center mb-4">
+                                        <p className="text-[#5A5DF6] text-xs font-semibold max-w-[250px] truncate">{files.length} file(s) selected</p>
+                                        <p className="text-[11px] text-[#1C2340]/50 mt-0.5">Click to browse again</p>
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-[#1C2340]/50 text-center mb-4 max-w-xs">
+                                        Drag and drop your CSV or Excel file here, or click to browse.
+                                    </p>
+                                )}
+
+                                <button
+                                    className={`${isUploading ? 'bg-[#D9DDE5] text-[#1C2340]/50 cursor-not-allowed' : 'bg-[#5A5DF6] hover:bg-[#494ce0] text-white'} px-5 py-2 text-xs font-semibold rounded-[4px] transition-colors shadow-sm`}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!selectedMarketplaceId) {
+                                            alert("Please select a marketplace first!");
+                                            return;
+                                        }
+                                        if (files.length > 0) handleUploadClick();
+                                        else fileInputRef.current.click();
+                                    }}
+                                    disabled={isUploading}
+                                >
+                                    {isUploading ? "Uploading..." : files.length > 0 ? "Upload Now" : "Browse Files"}
+                                </button>
+                                <p className="text-[10px] text-[#1C2340]/40 mt-3">
+                                    Supported formats: .csv, .xlsx, .xls (Max 10MB)
+                                </p>
+                            </div>
                         </div>
                     </div>
-                </div>
                 </div>
 
                 {/* Recent Reports List (Right Side) */}
@@ -403,9 +430,8 @@ const Upload = () => {
                                                 return (
                                                     <div
                                                         key={report.id}
-                                                        className={`flex items-center gap-2 px-2 py-1.5 rounded-[5px] transition-colors group border ${
-                                                            isSelected ? 'bg-[#5A5DF6]/5 border-[#5A5DF6]/20' : 'border-transparent hover:bg-[#F4F5F7] hover:border-[#D9DDE5]/30'
-                                                        }`}
+                                                        className={`flex items-center gap-2 px-2 py-1.5 rounded-[5px] transition-colors group border ${isSelected ? 'bg-[#5A5DF6]/5 border-[#5A5DF6]/20' : 'border-transparent hover:bg-[#F4F5F7] hover:border-[#D9DDE5]/30'
+                                                            }`}
                                                     >
                                                         {/* Checkbox */}
                                                         <input
@@ -573,11 +599,10 @@ const Upload = () => {
                             {uploadResults.map((result, idx) => (
                                 <div
                                     key={idx}
-                                    className={`rounded-[6px] border p-3 ${
-                                        result.status === 'success'
-                                            ? 'bg-[#22B573]/5 border-[#22B573]/20'
-                                            : 'bg-[#E74C3C]/5 border-[#E74C3C]/20'
-                                    }`}
+                                    className={`rounded-[6px] border p-3 ${result.status === 'success'
+                                        ? 'bg-[#22B573]/5 border-[#22B573]/20'
+                                        : 'bg-[#E74C3C]/5 border-[#E74C3C]/20'
+                                        }`}
                                 >
                                     <div className="flex items-start gap-2">
                                         {result.status === 'success' ? (
@@ -595,11 +620,10 @@ const Upload = () => {
                                             </p>
                                             {/* Detail / Error reason */}
                                             <p
-                                                className={`text-[10px] mt-0.5 leading-relaxed break-words ${
-                                                    result.status === 'success'
-                                                        ? 'text-[#22B573]'
-                                                        : 'text-[#E74C3C]'
-                                                }`}
+                                                className={`text-[10px] mt-0.5 leading-relaxed break-words ${result.status === 'success'
+                                                    ? 'text-[#22B573]'
+                                                    : 'text-[#E74C3C]'
+                                                    }`}
                                             >
                                                 {result.detail}
                                             </p>

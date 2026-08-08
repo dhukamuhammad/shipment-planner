@@ -25,8 +25,6 @@ const Manifest = () => {
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [selectedMarketplaceId, setSelectedMarketplaceId] = useState(location.state?.marketplace_id || "");
 
-
-
     // const [selectedMarketplaceId, setSelectedMarketplaceId] = useState(location.state?.marketplace_id || "");
     const [hasTemplate, setHasTemplate] = useState(false);
     const [selectedFile, setSelectedFile] = useState(null);
